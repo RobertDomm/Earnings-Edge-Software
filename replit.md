@@ -1,45 +1,130 @@
-# [Project name]
+# Circle Screener
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A Circle-gated stock & options screening dashboard. Authorized members of a designated Circle Space Group can scan and filter stocks using a modular screening engine. All access is verified server-side — sharing the URL never grants access.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port varies, check artifact.toml)
+- `pnpm --filter @workspace/screener run dev` — run the frontend (port varies)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- API: Express 5 + express-session (HttpOnly, Secure cookies)
+- Frontend: React + Vite + Tailwind CSS + shadcn/ui, wouter routing
+- Market data: MockMarketDataProvider (swap for LiveMarketDataProvider)
+- Auth: MockCircleAuthService in development (swap for LiveCircleAuthService)
+- Build: esbuild (CJS bundle for server)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+| Area | Path |
+|------|------|
+| OpenAPI contract | `lib/api-spec/openapi.yaml` |
+| Generated hooks | `lib/api-client-react/src/generated/` |
+| Generated Zod schemas | `lib/api-zod/src/generated/` |
+| Circle auth interface | `artifacts/api-server/src/lib/circle-auth.ts` |
+| Mock Circle auth | `artifacts/api-server/src/lib/mock-circle-auth.ts` |
+| Market data interface | `artifacts/api-server/src/lib/market-data.ts` |
+| Screening engine + filter rules | `artifacts/api-server/src/lib/screening-engine.ts` |
+| Auth routes | `artifacts/api-server/src/routes/auth.ts` |
+| Scanner routes | `artifacts/api-server/src/routes/scanner.ts` |
+| Stock detail route | `artifacts/api-server/src/routes/stocks.ts` |
+| Market status route | `artifacts/api-server/src/routes/market.ts` |
+| Frontend pages | `artifacts/screener/src/pages/` |
+| Frontend components | `artifacts/screener/src/components/` |
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- **Circle authorization is fully isolated** — `ICircleAuthService` interface separates auth from dashboard logic. Swapping in real Circle OAuth requires only implementing `LiveCircleAuthService`.
+- **Server-side session only** — no client-side auth flags. `requireAuth` middleware on every protected endpoint. Frontend flags are never trusted.
+- **Modular screening engine** — `FILTER_RULES` array in `screening-engine.ts` is the only place to add/modify filters. Each rule is a standalone `IFilterRule` object.
+- **MockMarketDataProvider** — `marketDataProvider` singleton in `services.ts`. Replace with `LiveMarketDataProvider` when a real data feed is available.
+- **Mock mode blocked in production** — `MockCircleAuthService` throws if `NODE_ENV=production`. Cannot accidentally ship with mock auth.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Dashboard with market status, scanner status, "Run Scanner" button, 5 placeholder filter slots, and a sortable/searchable stock results table
+- Stock detail slide-over: overview stats, full options chain table, filter-by-filter PASS/FAIL breakdown
+- Access Restricted page for unauthorized users; dev-mode login helper for testing
 
-## User preferences
+## Development mock auth
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+Set `CIRCLE_AUTH_MODE=mock` (default in development). Navigate to the Access Restricted page and click **[DEV] Inject Authorized Session** to simulate an authorized user. Or use the scenarios directly:
+
+| URL | Result |
+|-----|--------|
+| `/api/auth/login?scenario=authorized` | ACCESS GRANTED — Circle member + Space Group |
+| `/api/auth/login?scenario=unauthorized` | ACCESS DENIED — Circle member, no Space Group |
+| `/api/auth/login?scenario=anonymous` | ACCESS DENIED — not a Circle member |
+
+## What's needed for real Circle auth
+
+To connect real Circle OAuth:
+
+1. **Get from Circle developer settings:**
+   - `CIRCLE_CLIENT_ID` — OAuth application client ID
+   - `CIRCLE_CLIENT_SECRET` — OAuth application client secret
+   - `CIRCLE_REQUIRED_SPACE_GROUP_ID` — the Space Group ID that grants access
+   - `CIRCLE_COMMUNITY_ID` — your community identifier
+   - `CIRCLE_API_TOKEN` — API token for Space Group membership verification
+
+2. **Configure in Circle dashboard:**
+   - OAuth callback URL: `https://<your-domain>/api/auth/callback`
+
+3. **Implement `LiveCircleAuthService`** in `artifacts/api-server/src/lib/mock-circle-auth.ts` (stub is documented there)
+
+4. **Set environment variables:**
+   - `CIRCLE_AUTH_MODE=live`
+   - All credentials above in Replit Secrets
+
+5. **Set `NODE_ENV=production`** — mock mode is automatically blocked.
+
+## What's needed for live market data
+
+1. Choose a market data provider (e.g., Polygon.io, Alpaca, CBOE DataShop, Interactive Brokers)
+2. Implement `LiveMarketDataProvider` (see `IMarketDataProvider` interface in `artifacts/api-server/src/lib/market-data.ts`)
+3. Set `MARKET_DATA_PROVIDER=live` and `MARKET_DATA_API_KEY=<key>` in Replit Secrets
+4. Wire it into `artifacts/api-server/src/services.ts`
+
+## Where to add real filter rules
+
+Open `artifacts/api-server/src/lib/screening-engine.ts`. Scroll to the `FILTER_RULES` array at the bottom. Each rule implements `IFilterRule`:
+
+```typescript
+const myRule: IFilterRule = {
+  name: "My Filter Name",
+  evaluate(stock: StockQuote): FilterResult {
+    const passed = /* your logic here */;
+    return { name: this.name, passed, calculatedValue: "...", threshold: "...", explanation: "..." };
+  },
+};
+
+export const FILTER_RULES: IFilterRule[] = [myRule, ...otherRules];
+```
+
+Replace the 5 placeholder rules with the actual strategy. No other files need to change.
+
+## Required environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SESSION_SECRET` | Yes (already set) | Secret for signing session cookies |
+| `CIRCLE_AUTH_MODE` | No (defaults to `mock`) | `mock` for dev, `live` for production |
+| `CIRCLE_CLIENT_ID` | Live mode only | OAuth client ID |
+| `CIRCLE_CLIENT_SECRET` | Live mode only | OAuth client secret |
+| `CIRCLE_COMMUNITY_ID` | Live mode only | Circle community ID |
+| `CIRCLE_REQUIRED_SPACE_GROUP_ID` | Live mode only | Space Group that grants access |
+| `CIRCLE_API_TOKEN` | Live mode only | API token for membership checks |
+| `MARKET_DATA_PROVIDER` | No (defaults to mock) | `mock` or `live` |
+| `MARKET_DATA_API_KEY` | Live data only | Market data provider API key |
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- After changing `lib/api-spec/openapi.yaml`, always run codegen: `pnpm --filter @workspace/api-spec run codegen`
+- `CIRCLE_AUTH_MODE=mock` is blocked when `NODE_ENV=production` — this is intentional
+- Session revalidation TTL is 15 minutes — changing Space Group membership in Circle takes up to 15 min to propagate to access denial
+- The scanner state is in-memory — restarting the API server clears it; call "Run Scanner" again after restart

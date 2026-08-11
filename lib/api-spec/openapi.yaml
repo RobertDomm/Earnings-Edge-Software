@@ -3,13 +3,22 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API specification for Circle-gated stock & options screener
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Circle authorization
+  - name: market
+    description: Market status
+  - name: scanner
+    description: Stock scanner operations
+  - name: stocks
+    description: Stock details
+
 paths:
   /healthz:
     get:
@@ -24,13 +33,409 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/status:
+    get:
+      operationId: getAuthStatus
+      tags: [auth]
+      summary: Get current auth session status
+      description: Returns whether the current session is authorized
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /auth/login:
+    get:
+      operationId: initiateLogin
+      tags: [auth]
+      summary: Initiate Circle OAuth login
+      description: Redirects to Circle OAuth authorization page (or mock flow in dev)
+      parameters:
+        - name: scenario
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [authorized, unauthorized, anonymous]
+          description: "Dev mock only: which scenario to simulate"
+      responses:
+        "302":
+          description: Redirect to Circle OAuth
+        "200":
+          description: Mock login response (dev mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /auth/callback:
+    get:
+      operationId: handleAuthCallback
+      tags: [auth]
+      summary: OAuth callback handler
+      description: Handles OAuth callback, verifies Space Group, creates session
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to dashboard or access-restricted
+        "200":
+          description: Auth callback result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Log out and destroy session
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResult"
+
+  /market/status:
+    get:
+      operationId: getMarketStatus
+      tags: [market]
+      summary: Get current market status
+      description: Returns whether the market is open, closed, pre-market, or after-hours (requires auth)
+      responses:
+        "200":
+          description: Market status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketStatus"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /scanner/run:
+    post:
+      operationId: runScanner
+      tags: [scanner]
+      summary: Run the stock scanner
+      description: Runs the screening engine against current market data and returns results (requires auth)
+      responses:
+        "200":
+          description: Scan results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /scanner/results:
+    get:
+      operationId: getScannerResults
+      tags: [scanner]
+      summary: Get last scanner results and status
+      description: Returns the most recent scan results plus scanner status info (requires auth)
+      responses:
+        "200":
+          description: Scanner results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScannerState"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /stocks/{symbol}:
+    get:
+      operationId: getStockDetail
+      tags: [stocks]
+      summary: Get detailed stock info
+      description: Returns stock detail, options chain, and filter breakdown for a symbol (requires auth)
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stock detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockDetail"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Symbol not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    LogoutResult:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+
+    AuthStatus:
+      type: object
+      required: [authenticated, authorized, mode]
+      properties:
+        authenticated:
+          type: boolean
+          description: Whether the user has a valid Circle identity
+        authorized:
+          type: boolean
+          description: Whether the user has access to the required Space Group
+        mode:
+          type: string
+          enum: [mock, live]
+          description: Authorization mode
+        user:
+          $ref: "#/components/schemas/CircleUser"
+        loginUrl:
+          type: ["string", "null"]
+          description: URL to initiate login (present when not authenticated)
+
+    CircleUser:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+
+    MarketStatus:
+      type: object
+      required: [state, label, description, timestamp]
+      properties:
+        state:
+          type: string
+          enum: [open, closed, pre_market, after_hours]
+        label:
+          type: string
+        description:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        nextOpen:
+          type: ["string", "null"]
+          format: date-time
+        nextClose:
+          type: ["string", "null"]
+          format: date-time
+
+    FilterResult:
+      type: object
+      required: [name, passed, calculatedValue, threshold, explanation]
+      properties:
+        name:
+          type: string
+        passed:
+          type: boolean
+        calculatedValue:
+          type: string
+        threshold:
+          type: string
+        explanation:
+          type: string
+
+    StockResult:
+      type: object
+      required: [symbol, company, price, dailyChangePercent, volume, avgVolume, marketCap, impliedVolatility, optionsVolume, openInterest, filterScore, status, filterResults, qualified]
+      properties:
+        symbol:
+          type: string
+        company:
+          type: string
+        price:
+          type: number
+        dailyChangePercent:
+          type: number
+        volume:
+          type: number
+        avgVolume:
+          type: number
+        marketCap:
+          type: number
+        impliedVolatility:
+          type: number
+        optionsVolume:
+          type: number
+        openInterest:
+          type: number
+        filterScore:
+          type: number
+        status:
+          type: string
+          enum: [qualified, not_qualified]
+        qualified:
+          type: boolean
+        filterResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilterResult"
+
+    ScanResult:
+      type: object
+      required: [stocks, totalScanned, totalQualified, scanTime, dataAsOf]
+      properties:
+        stocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockResult"
+        totalScanned:
+          type: number
+        totalQualified:
+          type: number
+        scanTime:
+          type: string
+          format: date-time
+        dataAsOf:
+          type: string
+          format: date-time
+
+    ScannerState:
+      type: object
+      required: [hasResults, status]
+      properties:
+        hasResults:
+          type: boolean
+        status:
+          type: string
+          enum: [idle, running, complete, error]
+        lastScan:
+          oneOf:
+            - $ref: "#/components/schemas/ScanResult"
+            - type: "null"
+          description: Most recent scan result, or null if no scan has been run yet
+        lastScanTime:
+          type: ["string", "null"]
+          format: date-time
+
+    OptionsContract:
+      type: object
+      required: [strike, expiration, callBid, callAsk, callVolume, callOI, callIV, callDelta, callGamma, callTheta, callVega, putBid, putAsk, putVolume, putOI, putIV, putDelta, putGamma, putTheta, putVega]
+      properties:
+        strike:
+          type: number
+        expiration:
+          type: string
+          format: date
+        callBid:
+          type: number
+        callAsk:
+          type: number
+        callVolume:
+          type: number
+        callOI:
+          type: number
+        callIV:
+          type: number
+        callDelta:
+          type: number
+        callGamma:
+          type: number
+        callTheta:
+          type: number
+        callVega:
+          type: number
+        putBid:
+          type: number
+        putAsk:
+          type: number
+        putVolume:
+          type: number
+        putOI:
+          type: number
+        putIV:
+          type: number
+        putDelta:
+          type: number
+        putGamma:
+          type: number
+        putTheta:
+          type: number
+        putVega:
+          type: number
+
+    OptionsChain:
+      type: object
+      required: [symbol, expirations, contracts]
+      properties:
+        symbol:
+          type: string
+        expirations:
+          type: array
+          items:
+            type: string
+            format: date
+        contracts:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptionsContract"
+
+    StockDetail:
+      type: object
+      required: [stock, optionsChain]
+      properties:
+        stock:
+          $ref: "#/components/schemas/StockResult"
+        optionsChain:
+          $ref: "#/components/schemas/OptionsChain"

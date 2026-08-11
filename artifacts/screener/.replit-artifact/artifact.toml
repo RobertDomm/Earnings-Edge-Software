@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Stock & Options Screener"
+description = "A Circle-gated stock and options screening dashboard. Authorized members of a designated Circle Space Group can scan and analyze stocks using a modular filtering engine with mock market data. All access is verified server-side."
+version = "1.0.0"
+id = "artifacts/screener"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20427
+
+[services.development]
+run = "pnpm --filter @workspace/screener run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/screener", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/screener/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20427"
+BASE_PATH = "/"
