@@ -1,0 +1,1066 @@
+# Build a Private Circle-Gated Stock & Options Screening Web Application
+
+Build a production-quality full-stack web application for a client who operates a private community using Circle.
+
+The application will eventually analyze live stock and options market data and run a specific set of filters to identify stocks that meet the client's criteria for potential options trades.
+
+The detailed stock/options filtering strategy will be provided later.
+
+For this first phase, focus on:
+
+1. Secure Circle authentication and Space Group authorization
+2. Preventing unauthorized access through copied/shared links
+3. Building the stock/options dashboard
+4. Creating the architecture for live market data
+5. Creating a modular stock/options screening engine
+6. Using mock market data until the real data provider and filtering criteria are supplied
+
+---
+
+# 1. CRITICAL ACCESS REQUIREMENT
+
+This application is exclusively for members of the client's Circle community who have access to ONE SPECIFIC CIRCLE SPACE GROUP.
+
+Being a member of the overall Circle community is NOT sufficient.
+
+The authorization rule must be:
+
+**Authenticated Circle Member + Access to Required Space Group = ACCESS GRANTED**
+
+**Authenticated Circle Member + No Access to Required Space Group = ACCESS DENIED**
+
+**Not Authenticated Through Circle = ACCESS DENIED**
+
+The specific Circle Space Group will be configured later.
+
+Circle must remain the source of truth for determining whether someone is authorized to use this application.
+
+---
+
+# 2. NO SEPARATE APP LOGIN
+
+Do NOT create a traditional authentication system for this application.
+
+Users should NOT:
+
+* Create an account for this app
+* Create another username
+* Create another password
+* Register separately
+* Manually log into the application every time
+
+The intended user experience is:
+
+**User logs into Circle → User enters authorized Space Group → User launches application → App verifies Circle authorization → Dashboard opens**
+
+The authorization process should happen automatically and securely behind the scenes.
+
+The application can maintain a secure server-side session after Circle authorization has been verified.
+
+---
+
+# 3. SHARING THE APPLICATION URL MUST NOT GRANT ACCESS
+
+This requirement is extremely important.
+
+Do NOT protect this application simply by placing its URL inside a private Circle Space Group.
+
+Assume that authorized users will eventually discover the direct application URL.
+
+Someone must NOT gain access simply because an authorized user copies the URL and sends it to them.
+
+Example:
+
+### Authorized User
+
+User is logged into Circle.
+
+User has access to the required Space Group.
+
+User opens the application.
+
+Result:
+
+**ACCESS GRANTED**
+
+### Circle Member Without Space Group Access
+
+User has a valid Circle account.
+
+User belongs to the client's Circle community.
+
+User does NOT have access to the required Space Group.
+
+User obtains the application's direct URL from another member.
+
+Result:
+
+**ACCESS DENIED**
+
+### Non-Circle User
+
+Person is not an authorized member of the client's Circle community.
+
+Someone sends them the direct application URL.
+
+They open it.
+
+Result:
+
+**ACCESS DENIED**
+
+Therefore:
+
+**The URL itself must NEVER act as the authorization mechanism.**
+
+---
+
+# 4. SERVER-SIDE AUTHORIZATION
+
+All meaningful authorization must happen on the backend.
+
+Do NOT rely on:
+
+* Secret URLs
+* Hidden URLs
+* Frontend JavaScript
+* An iframe by itself
+* LocalStorage authorization flags
+* SessionStorage authorization flags
+* URL query parameters such as `?authorized=true`
+* Referrer headers as the primary security mechanism
+* Hiding buttons
+* Hiding navigation
+* Obfuscated frontend code
+* A password shared among Circle members
+
+Frontend restrictions are not security.
+
+The backend must independently determine whether the user is authorized.
+
+---
+
+# 5. CIRCLE AUTHORIZATION SERVICE
+
+Create a dedicated authorization module/service.
+
+For example:
+
+`CircleAuthService`
+
+This service should be responsible for:
+
+* Verifying the user's Circle identity
+* Verifying that the Circle user belongs to the correct community
+* Verifying that the user currently has access to the required Circle Space Group
+* Rejecting users without Space Group access
+* Establishing a secure application session for authorized users
+* Revalidating access when appropriate
+* Handling expired/invalid authorization
+* Handling Circle API/authentication errors safely
+
+Do not tightly couple Circle authentication logic to the stock dashboard.
+
+The Circle authorization layer should be modular so the exact Circle API, SSO, OAuth, JWT, signed-token, or other supported integration method can be configured later.
+
+Use the most secure officially supported Circle integration available for this use case.
+
+Do NOT invent unsupported Circle API endpoints.
+
+If actual Circle integration credentials or documentation are required, clearly identify what information I need to provide.
+
+---
+
+# 6. REQUIRED SPACE GROUP
+
+Create server-side configuration for the Circle Space Group that grants access to this application.
+
+For example:
+
+`CIRCLE_REQUIRED_SPACE_GROUP_ID`
+
+This value should be stored securely using Replit Secrets/environment variables.
+
+Do not hard-code sensitive Circle information into frontend JavaScript.
+
+The authorization logic should effectively perform:
+
+`Is this a valid Circle member?`
+
+AND
+
+`Does this Circle member currently have access to CIRCLE_REQUIRED_SPACE_GROUP_ID?`
+
+If BOTH conditions are true:
+
+**Allow access.**
+
+Otherwise:
+
+**Deny access.**
+
+---
+
+# 7. ACCESS REVOCATION
+
+Circle should remain the source of truth.
+
+If the client removes someone from the authorized Space Group, that user must also lose access to this application.
+
+Do not permanently authorize someone simply because they successfully accessed the application once.
+
+Use an appropriate secure session expiration/revalidation strategy.
+
+For example, authorization can be cached for a reasonable short period for performance, but the application should periodically revalidate Space Group access.
+
+Do not make the session unnecessarily long-lived.
+
+---
+
+# 8. PROTECT THE BACKEND APIs TOO
+
+Do not only protect the dashboard page.
+
+Every protected backend endpoint must require authorization.
+
+This includes endpoints that eventually provide:
+
+* Stock quotes
+* Stock scanner results
+* Options chains
+* Options statistics
+* Filter calculations
+* Screening results
+* Historical data
+* Greeks
+* Implied volatility
+* Ranking results
+* Other proprietary calculations
+
+If someone discovers an API endpoint and calls it directly without valid authorization, return an appropriate unauthorized response.
+
+The frontend should never be the only security layer.
+
+---
+
+# 9. AUTHORIZED USER EXPERIENCE
+
+The experience should be extremely simple for an authorized member.
+
+Desired flow:
+
+**Circle**
+
+↓
+
+**Authorized Space Group**
+
+↓
+
+**Click Stock/Options Tool**
+
+↓
+
+**Circle authorization verified**
+
+↓
+
+**Required Space Group access verified**
+
+↓
+
+**Secure app session established**
+
+↓
+
+**Dashboard opens**
+
+There should not be an additional visible login step if Circle's supported authentication architecture allows this.
+
+---
+
+# 10. UNAUTHORIZED USER EXPERIENCE
+
+Create a clean, professional Access Restricted page.
+
+Example message:
+
+**Access Restricted**
+
+This application is available only to authorized community members.
+
+Please return to the community to access this tool.
+
+Do not reveal:
+
+* Circle API details
+* Required Space Group IDs
+* Authentication implementation details
+* API errors
+* Stack traces
+* Environment variables
+* Security configuration
+
+Log useful technical errors server-side instead.
+
+---
+
+# 11. DEVELOPMENT AUTHENTICATION MODE
+
+During development, actual Circle authentication may not yet be available.
+
+Create a clearly separated MOCK/DEVELOPMENT authorization system.
+
+It should allow developers to simulate:
+
+### Scenario A
+
+Authenticated Circle user WITH required Space Group access.
+
+Result:
+
+**ACCESS GRANTED**
+
+### Scenario B
+
+Authenticated Circle user WITHOUT required Space Group access.
+
+Result:
+
+**ACCESS DENIED**
+
+### Scenario C
+
+Unauthenticated visitor.
+
+Result:
+
+**ACCESS DENIED**
+
+Mock authentication must be controlled by a development environment setting.
+
+It must be impossible to accidentally use mock authentication as the production authorization mechanism.
+
+Clearly document how mock mode is disabled before production deployment.
+
+---
+
+# 12. APPLICATION PURPOSE
+
+After authorization, the user enters a stock/options screening application.
+
+The eventual purpose of this application is to:
+
+1. Receive live or near-real-time market data.
+2. Analyze stocks.
+3. Analyze options data.
+4. Run the client's proprietary filtering criteria.
+5. Eliminate stocks that do not qualify.
+6. Identify stocks that meet the criteria.
+7. Present qualifying opportunities to authorized Circle members.
+
+The actual trading/filtering methodology will be supplied later.
+
+Do NOT invent a real trading strategy.
+
+---
+
+# 13. DASHBOARD
+
+Build a professional financial dashboard.
+
+It should be modern, clean, responsive, and easy to understand.
+
+Desktop should be the primary experience, but it should also work on tablets and phones.
+
+The main dashboard should contain placeholder sections for:
+
+### Market Status
+
+Display whether the market is:
+
+* Open
+* Closed
+* Pre-market
+* After-hours
+
+This can use mock information initially.
+
+### Scanner Status
+
+Display:
+
+* Number of stocks scanned
+* Number passing all filters
+* Last scan time
+* Data last updated
+* Scanner status
+
+### Run Scanner
+
+Include a prominent button such as:
+
+**Run Scanner**
+
+The eventual scanner will process current market data through the client's filtering criteria.
+
+For now, use mock data.
+
+### Filters
+
+Create an area where the client's future filters will appear.
+
+Do not invent the client's actual strategy.
+
+Use generic placeholder filters such as:
+
+* Filter 1
+* Filter 2
+* Filter 3
+* Filter 4
+* Filter 5
+
+These will be replaced when the actual strategy is supplied.
+
+---
+
+# 14. STOCK RESULTS TABLE
+
+Create a professional results table.
+
+For the prototype, include columns such as:
+
+* Symbol
+* Company
+* Stock Price
+* Daily Change %
+* Volume
+* Average Volume
+* Market Cap
+* Implied Volatility
+* Options Volume
+* Open Interest
+* Filter Score
+* Status
+
+These are placeholders and must be easy to modify later.
+
+Allow useful table functionality such as:
+
+* Sorting
+* Searching
+* Filtering
+* Refreshing
+* Selecting a stock
+
+Do not overcomplicate the first version.
+
+---
+
+# 15. STOCK DETAIL VIEW
+
+When a user clicks a stock, open a detailed view.
+
+This can be a modal, side panel, or dedicated page.
+
+Display placeholder sections for:
+
+### Stock Information
+
+* Symbol
+* Company
+* Current price
+* Price change
+* Volume
+* Average volume
+* Market cap
+
+### Options Information
+
+Prepare sections for future data such as:
+
+* Options volume
+* Open interest
+* Implied volatility
+* Expiration dates
+* Strike prices
+* Bid
+* Ask
+* Delta
+* Gamma
+* Theta
+* Vega
+
+Use mock values initially.
+
+---
+
+# 16. EXPLAIN WHY A STOCK QUALIFIED
+
+This will eventually be an important feature.
+
+The application should not only show qualifying stocks.
+
+It should be capable of showing WHY each stock passed the scanner.
+
+Design the architecture so each filtering rule returns something similar to:
+
+`Filter Name`
+
+`Passed: true/false`
+
+`Calculated Value`
+
+`Required Value/Threshold`
+
+`Explanation`
+
+For example, the UI might eventually display:
+
+Filter 1 — PASS
+
+Filter 2 — PASS
+
+Filter 3 — PASS
+
+Filter 4 — PASS
+
+Filter 5 — PASS
+
+Overall:
+
+**QUALIFIED**
+
+If a stock fails:
+
+Filter 1 — PASS
+
+Filter 2 — PASS
+
+Filter 3 — FAIL
+
+Filter 4 — PASS
+
+Overall:
+
+**NOT QUALIFIED**
+
+Do not implement actual investment criteria yet.
+
+---
+
+# 17. MODULAR SCREENING ENGINE
+
+Build the stock screening engine separately from the frontend.
+
+Do not put the screening logic directly inside React components or UI code.
+
+Create a modular architecture similar to:
+
+`ScreeningEngine`
+
+with independent filter rules.
+
+Conceptually:
+
+`Stock Data`
+
+↓
+
+`Filter 1`
+
+↓
+
+`Filter 2`
+
+↓
+
+`Filter 3`
+
+↓
+
+`Filter 4`
+
+↓
+
+`Final Qualification`
+
+Each filter should be independently editable.
+
+This is important because I will provide the client's actual filtering rules later.
+
+We should be able to add, remove, or modify individual filters without rewriting the application.
+
+---
+
+# 18. MARKET DATA PROVIDER
+
+Do NOT tightly couple the application to a specific market-data company yet.
+
+Create a modular market-data service/interface.
+
+For example:
+
+`MarketDataProvider`
+
+The application should eventually be capable of requesting:
+
+### Stock Data
+
+* Current price
+* Daily change
+* Volume
+* Average volume
+* Market cap
+* Historical prices
+* High/low data
+
+### Options Data
+
+* Options chains
+* Expiration dates
+* Strike prices
+* Calls
+* Puts
+* Bid
+* Ask
+* Volume
+* Open interest
+* Implied volatility
+* Greeks
+
+Use a:
+
+`MockMarketDataProvider`
+
+for the initial application.
+
+Later, we should be able to replace it with something like:
+
+`LiveMarketDataProvider`
+
+without rewriting the dashboard or screening engine.
+
+---
+
+# 19. LIVE DATA ARCHITECTURE
+
+The application will eventually process live or near-real-time financial market information.
+
+Design it so data can refresh without requiring the user to reload the entire webpage.
+
+Prepare the architecture for:
+
+* API requests
+* Scheduled refreshes
+* Manual scanner refresh
+* Loading states
+* API rate limits
+* Error handling
+* Data timestamps
+* Stale-data detection
+
+Do not purchase or assume access to any paid market-data API.
+
+Use mock data until a provider is selected.
+
+---
+
+# 20. SECURITY OF MARKET-DATA API KEYS
+
+Future stock/options API keys must never be exposed to the browser.
+
+Store them using Replit Secrets/environment variables.
+
+The architecture should be:
+
+**Browser**
+
+↓
+
+**Our Backend**
+
+↓
+
+**Market Data Provider**
+
+The browser should NOT directly contain private market-data API credentials.
+
+---
+
+# 21. PROJECT ARCHITECTURE
+
+Use a clean full-stack structure.
+
+Separate:
+
+### Frontend
+
+* Dashboard
+* Results table
+* Stock details
+* Filter explanations
+* Loading states
+* Error states
+* Access Restricted page
+
+### Backend
+
+* Circle authentication
+* Space Group authorization
+* Session management
+* Protected API middleware
+* Market-data service
+* Screening engine
+* Filter rules
+* Configuration
+* Logging
+* Error handling
+
+Do NOT build the entire application in one large file.
+
+Use reusable components and clearly organized modules.
+
+---
+
+# 22. SECURITY REQUIREMENTS
+
+Follow standard web application security practices.
+
+At minimum:
+
+* Keep secrets server-side.
+* Use secure environment variables.
+* Protect backend endpoints.
+* Validate inputs.
+* Use secure session cookies where applicable.
+* Use HttpOnly cookies where appropriate.
+* Use Secure cookies in production.
+* Use appropriate SameSite settings based on the final Circle launch/embed architecture.
+* Protect against CSRF where applicable.
+* Avoid exposing stack traces.
+* Avoid logging authentication tokens.
+* Never put private API keys into frontend code.
+* Never trust frontend authorization claims.
+* Never trust URL parameters as proof of authorization.
+* Validate Circle authorization server-side.
+* Validate required Space Group access server-side.
+
+---
+
+# 23. SESSION SECURITY
+
+After successful Circle authorization, establish a secure application session.
+
+Do not repeatedly expose Circle authentication credentials to the frontend.
+
+The session should:
+
+* Be difficult to steal
+* Expire appropriately
+* Be invalidated when necessary
+* Require reauthorization/revalidation periodically
+* Not permanently preserve access after Space Group access has been removed
+
+Do not create unnecessarily persistent sessions.
+
+---
+
+# 24. MULTI-USER ARCHITECTURE
+
+This is a one-size-fits-all application.
+
+Many authorized members may use it at the same time.
+
+For the first version:
+
+* No personal portfolios
+* No saved trades
+* No individual strategies
+* No individual filter settings
+* No separate app profiles
+* No separate app passwords
+
+Every authorized Space Group member uses the same scanner and same filtering methodology.
+
+However, structure the application so personalized features could potentially be added later.
+
+---
+
+# 25. FINANCIAL DISCLAIMER
+
+Include a small configurable disclaimer in the application footer.
+
+For development, use placeholder language indicating that the application is for informational/educational purposes and does not constitute financial advice.
+
+Keep the disclaimer configurable.
+
+The client's final approved legal language will be supplied later.
+
+---
+
+# 26. IMPORTANT: DO NOT IMPLEMENT TRADING
+
+This application is currently a scanner/research tool.
+
+Do NOT implement:
+
+* Brokerage account connections
+* Trade execution
+* Buy buttons
+* Sell buttons
+* Automatic trading
+* Automatic options orders
+
+The application should identify and display stocks/options matching the supplied filtering methodology.
+
+Trading functionality is outside the scope of this version.
+
+---
+
+# 27. INITIAL MOCK DATA
+
+Populate the prototype with realistic-looking but clearly mock stock data so the application can be tested visually.
+
+Use several fictional/sample records representing stocks with different:
+
+* Prices
+* Volumes
+* Market caps
+* Options volumes
+* Open interest
+* Implied volatility
+* Filter results
+
+Clearly identify development/mock data in the code so it cannot be mistaken for live market information.
+
+---
+
+# 28. ENVIRONMENT CONFIGURATION
+
+Prepare environment variables for future integrations.
+
+For example:
+
+`NODE_ENV`
+
+`CIRCLE_AUTH_MODE`
+
+`CIRCLE_COMMUNITY_ID`
+
+`CIRCLE_REQUIRED_SPACE_GROUP_ID`
+
+`CIRCLE_CLIENT_ID`
+
+`CIRCLE_CLIENT_SECRET`
+
+`CIRCLE_API_TOKEN`
+
+`MARKET_DATA_PROVIDER`
+
+`MARKET_DATA_API_KEY`
+
+These names are examples.
+
+Only create variables actually required by the final integration.
+
+Do not assume Circle requires all of these credentials.
+
+Do not expose secrets to the frontend.
+
+---
+
+# 29. DOCUMENTATION
+
+Create a README explaining:
+
+### Local/Development Setup
+
+How to run the application.
+
+### Mock Authentication
+
+How to test:
+
+* Authorized user
+* Unauthorized Circle member
+* Unauthenticated visitor
+
+### Circle Integration
+
+Clearly identify what information is still required from me to connect the real Circle account.
+
+For example:
+
+* Circle community information
+* Required Space Group
+* Required Space Group ID if applicable
+* Circle API/authentication credentials
+* Circle authentication method
+* Redirect/callback URLs if required
+
+Do not invent these values.
+
+### Market Data Integration
+
+Explain where a live market-data provider will later be connected.
+
+### Screening Rules
+
+Explain exactly where the client's actual stock/options filters will later be added.
+
+---
+
+# 30. BUILD THIS IN PHASES
+
+Do not try to implement unsupported Circle functionality by guessing.
+
+Build in this order:
+
+### Phase 1 — Architecture
+
+Create the full project structure.
+
+### Phase 2 — Mock Circle Authorization
+
+Implement development authorization states.
+
+### Phase 3 — Protected Application
+
+Ensure unauthorized users cannot access the dashboard or protected backend endpoints.
+
+### Phase 4 — Dashboard
+
+Build the stock/options scanner interface.
+
+### Phase 5 — Mock Market Data
+
+Connect the dashboard to the MockMarketDataProvider.
+
+### Phase 6 — Screening Engine
+
+Build modular placeholder filtering logic.
+
+### Phase 7 — Circle Integration Preparation
+
+Create the CircleAuthService interface and document exactly what is needed to replace mock authorization with real Circle authorization.
+
+### Phase 8 — Testing
+
+Test authorization scenarios and protected endpoints.
+
+---
+
+# 31. TEST THESE ACCESS SCENARIOS
+
+Create tests for the following situations.
+
+### Test 1
+
+Circle member + required Space Group access.
+
+Expected:
+
+**ACCESS GRANTED**
+
+### Test 2
+
+Circle member + does NOT have required Space Group access.
+
+Expected:
+
+**ACCESS DENIED**
+
+### Test 3
+
+Non-Circle visitor opens direct application URL.
+
+Expected:
+
+**ACCESS DENIED**
+
+### Test 4
+
+Authorized member copies application URL and sends it to unauthorized Circle member.
+
+Expected:
+
+**ACCESS DENIED**
+
+### Test 5
+
+Authorized member copies application URL and sends it to non-Circle user.
+
+Expected:
+
+**ACCESS DENIED**
+
+### Test 6
+
+User attempts to directly access a protected stock API endpoint without authorization.
+
+Expected:
+
+**REQUEST DENIED**
+
+### Test 7
+
+Previously authorized user loses access to the required Circle Space Group.
+
+After appropriate session revalidation:
+
+**ACCESS DENIED**
+
+### Test 8
+
+User modifies frontend code or browser storage to attempt to appear authorized.
+
+Expected:
+
+**ACCESS DENIED**
+
+---
+
+# 32. MOST IMPORTANT RULE
+
+The fundamental security model for this application is:
+
+**CIRCLE MEMBERSHIP ALONE DOES NOT GRANT ACCESS.**
+
+The user MUST have access to the specifically configured Circle Space Group.
+
+Think of the required Circle Space Group as the application's permission group.
+
+Circle remains responsible for deciding who belongs to that group.
+
+The Replit application is responsible for securely verifying that permission before granting access.
+
+A direct URL must never bypass this requirement.
+
+---
+
+# 33. DEFINITION OF SUCCESS FOR VERSION 1
+
+Version 1 is successful when:
+
+1. The application has a professional stock/options scanner dashboard.
+2. Mock stock/options data is displayed.
+3. A modular screening engine exists.
+4. Individual filtering rules can easily be added later.
+5. Circle authentication is isolated into a dedicated service.
+6. Access requires membership in the designated Circle Space Group.
+7. Ordinary Circle members without that Space Group cannot access the application.
+8. Non-Circle visitors cannot access the application.
+9. Sharing the direct application URL does not grant authorization.
+10. Protected backend endpoints cannot be accessed without authorization.
+11. Mock authentication allows development before real Circle credentials are connected.
+12. The project clearly documents what information is required to activate real Circle authentication.
+13. The architecture is ready for a live stock/options market-data provider.
+14. No real trading strategy is invented.
+15. No brokerage/trade-execution functionality is implemented.
+
+Before making assumptions about Circle's current authentication/API capabilities, stop and identify what information or credentials are needed from me.
+
+Do not weaken the security model just to make the prototype easier to build.
+
+The final production application must use Circle authentication plus verification of access to the specifically designated Circle Space Group as the gatekeeper for the entire stock/options application.
