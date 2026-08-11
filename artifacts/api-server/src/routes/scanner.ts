@@ -1,18 +1,28 @@
 /**
  * Scanner routes
  *
- * POST /api/scanner/run      — run the screening engine (requires auth)
- * GET  /api/scanner/results  — get last scan results + status (requires auth)
+ * POST /api/scanner/run      — start a scan (requires auth)
+ * GET  /api/scanner/results  — get scan status + last results (requires auth)
+ *
+ * The POST endpoint responds immediately (HTTP 200) with the most recent
+ * scan data (or an empty placeholder if no scan has run yet) and kicks off
+ * the actual enrichment + screening as a fire-and-forget background task.
+ * This ensures the HTTP response always completes well within server timeout
+ * budgets, regardless of how long the underlying market-data API calls take.
+ *
+ * Clients should poll GET /api/scanner/results (or watch the status field)
+ * to detect when a scan transitions from "running" → "complete" | "error".
  */
 
 import { Router, type IRouter } from "express";
 import { requireAuth } from "../middlewares/require-auth.js";
 import { marketDataProvider, screeningEngine } from "../services.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
-// In-memory scan state — shared across all requests
-// In a multi-instance deployment, this would move to a database/cache layer
+// In-memory scan state — shared across all requests for this process.
+// In a multi-instance deployment this would live in a shared cache/database.
 let lastScanResult: {
   stocks: ReturnType<typeof screeningEngine.runScreening>;
   totalScanned: number;
@@ -23,43 +33,55 @@ let lastScanResult: {
 
 let scannerStatus: "idle" | "running" | "complete" | "error" = "idle";
 
-// POST /scanner/run — run the scanner
-router.post("/scanner/run", requireAuth, async (req, res): Promise<void> => {
+// POST /scanner/run — start a scan
+router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
   if (scannerStatus === "running") {
     res.status(409).json({ error: "Scanner is already running" });
     return;
   }
 
   scannerStatus = "running";
-  const scanTime = new Date();
 
-  try {
-    const stocks = await marketDataProvider.getStockUniverse();
-    const results = screeningEngine.runScreening(stocks);
-
-    lastScanResult = {
-      stocks: results,
-      totalScanned: results.length,
-      totalQualified: results.filter((r) => r.qualified).length,
-      scanTime: scanTime.toISOString(),
+  // Respond immediately with the most recent scan result (may be from a
+  // previous run).  The client polls GET /scanner/results for completion.
+  res.json(
+    lastScanResult ?? {
+      stocks: [],
+      totalScanned: 0,
+      totalQualified: 0,
+      scanTime: new Date().toISOString(),
       dataAsOf: new Date().toISOString(),
-    };
-    scannerStatus = "complete";
+    }
+  );
 
-    req.log.info(
-      {
-        totalScanned: lastScanResult.totalScanned,
-        totalQualified: lastScanResult.totalQualified,
-      },
-      "Scanner run complete"
-    );
+  // Run the actual scan as a background task after the HTTP response is sent.
+  const scanTime = new Date();
+  void (async () => {
+    try {
+      const stocks = await marketDataProvider.getStockUniverse();
+      const results = screeningEngine.runScreening(stocks);
 
-    res.json(lastScanResult);
-  } catch (err) {
-    scannerStatus = "error";
-    req.log.error({ err }, "Scanner run failed");
-    res.status(500).json({ error: "Scanner encountered an error" });
-  }
+      lastScanResult = {
+        stocks: results,
+        totalScanned: results.length,
+        totalQualified: results.filter((r) => r.qualified).length,
+        scanTime: scanTime.toISOString(),
+        dataAsOf: new Date().toISOString(),
+      };
+      scannerStatus = "complete";
+
+      logger.info(
+        {
+          totalScanned: lastScanResult.totalScanned,
+          totalQualified: lastScanResult.totalQualified,
+        },
+        "Scanner run complete"
+      );
+    } catch (err) {
+      scannerStatus = "error";
+      logger.error({ err }, "Scanner run failed");
+    }
+  })();
 });
 
 // GET /scanner/results — get last scan results and status

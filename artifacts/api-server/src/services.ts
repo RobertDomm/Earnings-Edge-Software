@@ -5,12 +5,13 @@
  */
 
 import { createCircleAuthService } from "./lib/mock-circle-auth.js";
-import { marketDataProvider } from "./lib/market-data.js";
+import { createMarketDataProvider } from "./lib/market-data.js";
 import { screeningEngine } from "./lib/screening-engine.js";
 import { logger } from "./lib/logger.js";
 
 export const circleAuthService = createCircleAuthService();
-export { marketDataProvider, screeningEngine };
+export const marketDataProvider = createMarketDataProvider();
+export { screeningEngine };
 
 logger.info(
   {

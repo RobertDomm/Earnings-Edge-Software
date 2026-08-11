@@ -15,7 +15,7 @@ A Circle-gated stock & options screening dashboard. Authorized members of a desi
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5 + express-session (HttpOnly, Secure cookies)
 - Frontend: React + Vite + Tailwind CSS + shadcn/ui, wouter routing
-- Market data: MockMarketDataProvider (swap for LiveMarketDataProvider)
+- Market data: MockMarketDataProvider (dev default) / LiveMarketDataProvider via Polygon.io (set MARKET_DATA_PROVIDER=live)
 - Auth: MockCircleAuthService in development (swap for LiveCircleAuthService)
 - Build: esbuild (CJS bundle for server)
 
@@ -85,10 +85,21 @@ To connect real Circle OAuth:
 
 ## What's needed for live market data
 
-1. Choose a market data provider (e.g., Polygon.io, Alpaca, CBOE DataShop, Interactive Brokers)
-2. Implement `LiveMarketDataProvider` (see `IMarketDataProvider` interface in `artifacts/api-server/src/lib/market-data.ts`)
-3. Set `MARKET_DATA_PROVIDER=live` and `MARKET_DATA_API_KEY=<key>` in Replit Secrets
-4. Wire it into `artifacts/api-server/src/services.ts`
+`LiveMarketDataProvider` is already implemented using **Polygon.io**. To activate it:
+
+1. Get a free (or paid) API key at [polygon.io](https://polygon.io/)
+2. Add it to Replit Secrets: `MARKET_DATA_API_KEY=<your key>`
+3. Set `MARKET_DATA_PROVIDER=live` in the environment (shared or production)
+4. Restart the API server — it will log `dataProvider: LiveMarketDataProvider (Polygon.io)`
+
+The live provider fetches:
+- **Stock universe** — ~75 high-liquidity optionable US equities + ETFs (edit `LIVE_STOCK_UNIVERSE` in `market-data.ts` to customize)
+- **Options chains** — real contracts with Greeks via `/v3/snapshot/options/{ticker}` (Greeks require a paid Polygon plan; free tier returns quotes without them)
+- **Market status** — precise session state (pre-market, open, after-hours) via `/v1/marketstatus/now`
+
+**Polygon plan requirement**: live mode makes ~150 API calls per universe refresh (1 batch snapshot + 2 per ticker). The default rate limit is **100 req/min** (Polygon Starter plan), which completes the first cache populate in ~2 minutes. The free tier (5 req/min) takes ~30 minutes — not recommended for production. Set `POLYGON_REQUESTS_PER_MINUTE=5` explicitly if you only have a free key and are testing.
+
+The mock provider remains the default (`MARKET_DATA_PROVIDER` unset or `mock`) and requires no API key.
 
 ## Where to add real filter rules
 
@@ -120,7 +131,8 @@ Replace the 5 placeholder rules with the actual strategy. No other files need to
 | `CIRCLE_REQUIRED_SPACE_GROUP_ID` | Live mode only | Space Group that grants access |
 | `CIRCLE_API_TOKEN` | Live mode only | API token for membership checks |
 | `MARKET_DATA_PROVIDER` | No (defaults to mock) | `mock` or `live` |
-| `MARKET_DATA_API_KEY` | Live data only | Market data provider API key |
+| `MARKET_DATA_API_KEY` | Live data only | Polygon.io API key |
+| `POLYGON_REQUESTS_PER_MINUTE` | No (defaults to 5) | Rate limit for Polygon API calls; 5 = free tier, set higher for paid plans |
 
 ## Gotchas
 
