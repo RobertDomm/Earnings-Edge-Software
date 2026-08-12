@@ -252,7 +252,9 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
 
                       {/* Score */}
                       <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
-                        {stock.filterScore}%
+                        {stock.filterResults
+                          ? `${stock.filterResults.filter((fr) => fr.passed).length}/${stock.filterResults.length}`
+                          : "—"}
                       </TableCell>
 
                       {/* Status badge */}
