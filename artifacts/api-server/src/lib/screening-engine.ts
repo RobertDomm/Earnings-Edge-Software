@@ -350,26 +350,27 @@ const filter5: IFilterRule = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter 6 — Double Calendar Structure
+// Filter 6 — Calendar Ratio Spread Structure
 //
-// For the double calendar trade (short 11 DTE, long 18 DTE at same strikes),
-// both peaks of the risk graph must sit ABOVE the zero line at the short's
-// expiry. The call-side peak is the calendar P&L when the stock lands at the
-// call strike; the put-side peak is the P&L when the stock lands at the put
-// strike. Both must be positive for the trade structure to qualify.
+// For the calendar ratio spread (1 short near-term, 2 longs far-term at the
+// same strike), both peaks of the risk graph must sit ABOVE the zero line at
+// the short's expiry. The call-side peak is the P&L when the stock lands at
+// the call strike; the put-side peak is the P&L when the stock lands at the
+// put strike. Both must be positive for the trade structure to qualify.
 //
-//   callCalendarPeak = bsAtm(callStrike, long18DteIV, 7d) − total debit
-//   putCalendarPeak  = bsAtm(putStrike,  long18DteIV, 7d) − total debit
+//   debit per side   = 2 × longMid − shortMid
+//   callCalendarPeak = 2 × bsAtm(callStrike, longIV, remainT) − totalDebit
+//   putCalendarPeak  = 2 × bsAtm(putStrike,  longIV, remainT) − totalDebit
 //
-// A negative peak means the long option's remaining value at the short's
+// A negative peak means the two long options' remaining value at the short's
 // expiry does not cover the net debit paid — the trade loses money even in
 // the best-case scenario.
 // ---------------------------------------------------------------------------
 
 const filter6: IFilterRule = {
-  name: "Filter 6 — Double Calendar Structure",
+  name: "Filter 6 — Calendar Ratio Spread Structure",
   description:
-    "Verifies that a double calendar spread (short 11 DTE, long 18 DTE) at the 30–60¢ OTM strikes produces a risk graph where both peaks sit above the zero line — confirming the trade structure is viable before entry.",
+    "Verifies that a calendar ratio spread (1 short near-term, 2 longs far-term at the 30–60¢ OTM strikes) produces a risk graph where both peaks sit above the zero line — confirming the trade structure is viable before entry.",
   defaultThreshold: "Both calendar peaks > $0 at short expiry",
   evaluate(stock) {
     const lm = stock.liquidityMetrics;
@@ -386,7 +387,7 @@ const filter6: IFilterRule = {
         passed: false,
         calculatedValue: "No calendar data",
         threshold: "Both peaks > $0",
-        explanation: `No double calendar data for ${stock.symbol} — the options chain did not contain both 11 DTE and 18 DTE contracts with 30–60¢ OTM strikes.`,
+        explanation: `No calendar ratio spread data for ${stock.symbol} — the options chain did not contain both near-term and far-term contracts with 30–60¢ OTM strikes.`,
       };
     }
 
@@ -402,14 +403,14 @@ const filter6: IFilterRule = {
       calculatedValue: `${fmt(lm.callCalendarPeak)} call  /  ${fmt(lm.putCalendarPeak)} put`,
       threshold: "Both peaks > $0",
       explanation: passed
-        ? `Both risk-graph peaks are above zero — ${callDesc}; ${putDesc}. The double calendar structure is viable.`
+        ? `Both risk-graph peaks are above zero — ${callDesc}; ${putDesc}. The calendar ratio spread structure is viable.`
         : `${
             lm.callCalendarPeak <= 0 && lm.putCalendarPeak <= 0
               ? `Both peaks are at or below zero (${callDesc}; ${putDesc}).`
               : lm.callCalendarPeak <= 0
-              ? `Call-side peak is below zero (${callDesc}; ${putDesc}). The 18 DTE long at $${lm.shortCallStrike} is priced too high relative to its remaining value at the short's expiry.`
-              : `Put-side peak is below zero (${callDesc}; ${putDesc}). The 18 DTE long at $${lm.shortPutStrike} is priced too high relative to its remaining value at the short's expiry.`
-          } Skipping — risk graph does not show a proper double calendar structure.`,
+              ? `Call-side peak is below zero (${callDesc}; ${putDesc}). The two far-term longs at $${lm.shortCallStrike} don't recover the net debit by the short's expiry.`
+              : `Put-side peak is below zero (${callDesc}; ${putDesc}). The two far-term longs at $${lm.shortPutStrike} don't recover the net debit by the short's expiry.`
+          } Skipping — risk graph does not show a viable calendar ratio spread structure.`,
     };
   },
 };

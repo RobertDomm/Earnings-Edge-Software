@@ -1487,19 +1487,22 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             shortCallStrike = cStrike;
             shortPutStrike  = pStrike;
 
-            const callDebit   = longCallMid - shortCallMid;
-            const putDebit    = longPutMid  - shortPutMid;
+            // Calendar ratio spread: 1 short near-term, 2 longs far-term per side.
+            // Debit = 2 × long − 1 × short (per side).
+            const callDebit   = 2 * longCallMid - shortCallMid;
+            const putDebit    = 2 * longPutMid  - shortPutMid;
             const totalDebit  = callDebit + putDebit;
 
             // Days remaining on the long after the short expires.
             const remainDays = (longerTermDte ?? 18) - (nearTermDte ?? 11);
             const remainT    = Math.max(remainDays, 1) / 365;
 
+            // Peak = 2 × bsAtm(long remaining value) − total debit paid.
             callCalendarPeak = parseFloat(
-              (bsAtmValue(cStrike, longCallIv, remainT) - totalDebit).toFixed(2)
+              (2 * bsAtmValue(cStrike, longCallIv, remainT) - totalDebit).toFixed(2)
             );
             putCalendarPeak = parseFloat(
-              (bsAtmValue(pStrike, longPutIv, remainT) - totalDebit).toFixed(2)
+              (2 * bsAtmValue(pStrike, longPutIv, remainT) - totalDebit).toFixed(2)
             );
           }
         }
@@ -2478,12 +2481,15 @@ export class ThetaDataProvider implements IMarketDataProvider {
               : bsAtmValue(bestPut.strike, longPutG.iv, remainT)
           : bsAtmValue(bestPut.strike, longPutG.iv, remainT);
 
-        const callDebit  = longCallMid - shortCallMid;
-        const putDebit   = longPutMid  - shortPutMid;
+        // Calendar ratio spread: 1 short near-term, 2 longs far-term per side.
+        // Debit = 2 × long − 1 × short (per side).
+        const callDebit  = 2 * longCallMid - shortCallMid;
+        const putDebit   = 2 * longPutMid  - shortPutMid;
         const totalDebit = callDebit + putDebit;
 
-        callCalendarPeak = parseFloat((bsAtmValue(bestCall.strike, longCallG.iv, remainT) - totalDebit).toFixed(2));
-        putCalendarPeak  = parseFloat((bsAtmValue(bestPut.strike,  longPutG.iv,  remainT) - totalDebit).toFixed(2));
+        // Peak = 2 × bsAtm(long remaining value) − total debit paid.
+        callCalendarPeak = parseFloat((2 * bsAtmValue(bestCall.strike, longCallG.iv, remainT) - totalDebit).toFixed(2));
+        putCalendarPeak  = parseFloat((2 * bsAtmValue(bestPut.strike,  longPutG.iv,  remainT) - totalDebit).toFixed(2));
       }
     }
 
