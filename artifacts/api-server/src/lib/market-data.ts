@@ -2032,37 +2032,52 @@ async function fetchYahooStockQuotes(
   symbols: string[]
 ): Promise<Map<string, YahooStockData>> {
   const result = new Map<string, YahooStockData>();
-  const BATCH = 25; // Yahoo allows many symbols per call; stay conservative
-  for (let i = 0; i < symbols.length; i += BATCH) {
-    const batch = symbols.slice(i, i + BATCH).join(",");
+
+  // Yahoo Finance v7/quote is blocked; v8/chart works per-symbol.
+  // Fetch all in parallel, capped at 15 concurrent requests.
+  const CONCURRENCY = 15;
+
+  async function fetchOne(sym: string): Promise<void> {
     try {
       const url =
-        `https://query1.finance.yahoo.com/v7/finance/quote` +
-        `?symbols=${encodeURIComponent(batch)}&lang=en-US&region=US`;
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}` +
+        `?interval=1d&range=30d`;
       const res = await fetch(url, {
         headers: { "User-Agent": "Mozilla/5.0" },
         signal: AbortSignal.timeout(12_000),
       });
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const data = await res.json() as {
-        quoteResponse?: { result?: Array<Record<string, unknown>> };
+        chart?: { result?: Array<{
+          meta?: Record<string, unknown>;
+          indicators?: { quote?: Array<{ volume?: number[]; close?: number[] }> };
+        }> };
       };
-      for (const q of data.quoteResponse?.result ?? []) {
-        const sym = String(q["symbol"] ?? "");
-        if (!sym) continue;
-        result.set(sym, {
-          price:         Number(q["regularMarketPrice"] ?? 0),
-          changePercent: Number(q["regularMarketChangePercent"] ?? 0),
-          volume:        Math.round(Number(q["regularMarketVolume"] ?? 0)),
-          avgVolume:     Math.round(Number(q["averageDailyVolume3Month"] ?? q["averageDailyVolume10Day"] ?? 0)),
-          marketCap:     Number(q["marketCap"] ?? 0),
-          name:          String(q["shortName"] ?? q["longName"] ?? sym),
-        });
-      }
+      const r = data.chart?.result?.[0];
+      if (!r) return;
+      const m = r.meta ?? {};
+      const price    = Number(m["regularMarketPrice"] ?? 0);
+      const prevClose = Number(m["chartPreviousClose"] ?? price);
+      const changePercent = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0;
+      const volume   = Math.round(Number(m["regularMarketVolume"] ?? 0));
+      // Compute avgVolume from the last 30 days of historical volume
+      const volumes  = r.indicators?.quote?.[0]?.volume?.filter((v): v is number => v != null) ?? [];
+      const avgVolume = volumes.length > 0
+        ? Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length)
+        : volume;
+      // marketCap not available from this endpoint — display only, not used in filters
+      const name = String(m["longName"] ?? m["shortName"] ?? sym);
+      result.set(sym, { price, changePercent, volume, avgVolume, marketCap: 0, name });
     } catch {
-      // Batch failed — symbols in this batch will appear with zero price
+      // Symbol failed — will appear with zero price
     }
   }
+
+  // Run with concurrency limit
+  for (let i = 0; i < symbols.length; i += CONCURRENCY) {
+    await Promise.all(symbols.slice(i, i + CONCURRENCY).map(fetchOne));
+  }
+
   return result;
 }
 
