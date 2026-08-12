@@ -31,7 +31,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ScreeningEngine, FILTER_RULES } from "../screening-engine.js";
+import { ScreeningEngine, FILTER_RULES, type ScreeningResult } from "../screening-engine.js";
 import { MOCK_STOCKS } from "../market-data.js";
 
 // ---------------------------------------------------------------------------
@@ -341,7 +341,49 @@ describe("Full pipeline — disqualification reasons", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. No mutable-state contamination between stocks
+// 6. Passthrough display fields match the source StockQuote
+//
+// evaluateStock() must copy every display field from the input StockQuote
+// unchanged. A bug that shadows or overwrites any of these fields would not
+// be caught by the qualified/filterScore assertions above.
+// ---------------------------------------------------------------------------
+
+describe("Full pipeline — passthrough display fields match StockQuote source", () => {
+  // Check every stock in MOCK_STOCKS so that both qualified and non-qualified
+  // paths are covered.
+  // Fields that must be copied verbatim from StockQuote → ScreeningResult.
+  // Typed as the intersection of both interfaces' keys so TypeScript enforces
+  // that every name actually exists on both types.
+  type SharedDisplayKey = keyof ScreeningResult & keyof typeof MOCK_STOCKS[number];
+  const DISPLAY_FIELDS: SharedDisplayKey[] = [
+    "symbol",
+    "company",
+    "price",
+    "dailyChangePercent",
+    "volume",
+    "avgVolume",
+    "marketCap",
+    "impliedVolatility",
+    "optionsVolume",
+    "openInterest",
+  ];
+
+  for (const stock of MOCK_STOCKS) {
+    for (const field of DISPLAY_FIELDS) {
+      it(`${stock.symbol}.${field} matches MOCK_STOCKS source`, () => {
+        const r = resultFor(stock.symbol);
+        assert.equal(
+          r[field],
+          stock[field],
+          `${stock.symbol}.${field}: expected ${String(stock[field])}, got ${String(r[field])}`
+        );
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7. No mutable-state contamination between stocks
 // ---------------------------------------------------------------------------
 
 describe("Full pipeline — no cross-stock state contamination", () => {
