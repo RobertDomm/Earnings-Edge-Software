@@ -42,6 +42,7 @@ const filter2 = FILTER_RULES[1];
 const filter3 = FILTER_RULES[2];
 const filter4 = FILTER_RULES[3];
 const filter5 = FILTER_RULES[4];
+const filter6 = FILTER_RULES[5];
 
 // ---------------------------------------------------------------------------
 // Date helpers
@@ -655,6 +656,235 @@ describe("Filter 5 — Earnings Verified 2 Weeks Out: independent re-verificatio
     assert.ok(
       result.explanation.includes("16"),
       `explanation must mention the days count (got: "${result.explanation}")`
+    );
+  });
+});
+
+// ===========================================================================
+// Filter 6 — Double Calendar Structure
+// ===========================================================================
+
+/** Builds a full liquidityMetrics fixture for Filter 6 tests. */
+function calendarMetrics(overrides: {
+  shortCallStrike?: number | null;
+  shortPutStrike?: number | null;
+  callCalendarPeak?: number | null;
+  putCalendarPeak?: number | null;
+}): import("../market-data.js").OptionsLiquidityMetrics {
+  return {
+    hasWeeklyOptions: true,
+    hasPennyIncrements: true,
+    nearTermSpread: 0.15,
+    nearTermDte: 11,
+    nearTermIv: 0.35,
+    shortCallStrike: overrides.shortCallStrike !== undefined ? overrides.shortCallStrike : 110,
+    shortPutStrike:  overrides.shortPutStrike  !== undefined ? overrides.shortPutStrike  : 90,
+    callCalendarPeak: overrides.callCalendarPeak !== undefined ? overrides.callCalendarPeak : 1.50,
+    putCalendarPeak:  overrides.putCalendarPeak  !== undefined ? overrides.putCalendarPeak  : 1.20,
+  };
+}
+
+describe("Filter 6 — Double Calendar Structure: positive cases", () => {
+  it("passes when both callCalendarPeak and putCalendarPeak are above zero", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 1.50, putCalendarPeak: 1.20 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, true, "both peaks > 0 must pass");
+  });
+
+  it("passes with large positive peaks matching META mock values (+$3.42 / +$2.91)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        shortCallStrike: 560.0,
+        shortPutStrike: 467.5,
+        callCalendarPeak: 3.42,
+        putCalendarPeak: 2.91,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, true, "large positive peaks must pass");
+    // calculatedValue must format both peaks with sign prefix and dollar sign
+    assert.ok(
+      result.calculatedValue.includes("+$3.42"),
+      `calculatedValue must include '+$3.42' (got: "${result.calculatedValue}")`
+    );
+    assert.ok(
+      result.calculatedValue.includes("+$2.91"),
+      `calculatedValue must include '+$2.91' (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("result.name includes 'Filter 6'", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0.50, putCalendarPeak: 0.50 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.ok(result.name.includes("Filter 6"), `name must include 'Filter 6' (got: "${result.name}")`);
+  });
+
+  it("threshold string mentions both peaks and zero", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 1.00, putCalendarPeak: 1.00 }),
+    });
+    const result = filter6.evaluate(stock);
+    const t = result.threshold.toLowerCase();
+    assert.ok(
+      t.includes("peak") || t.includes(">") || t.includes("$0"),
+      `threshold must reference peaks and zero line (got: "${result.threshold}")`
+    );
+  });
+});
+
+describe("Filter 6 — Double Calendar Structure: negative cases", () => {
+  it("fails when callCalendarPeak is exactly zero (at the zero line — not above)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0, putCalendarPeak: 1.20 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "callCalendarPeak = 0 must fail — must be strictly above zero");
+    assert.ok(
+      result.explanation.toLowerCase().includes("call"),
+      `explanation must name the call side (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when callCalendarPeak is negative (call-side peak below zero line)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: -0.43, putCalendarPeak: 1.18 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "negative callCalendarPeak must fail");
+    assert.ok(
+      result.explanation.toLowerCase().includes("call"),
+      `explanation must name the call side (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when putCalendarPeak is exactly zero (at the zero line — not above)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 1.50, putCalendarPeak: 0 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "putCalendarPeak = 0 must fail — must be strictly above zero");
+    assert.ok(
+      result.explanation.toLowerCase().includes("put"),
+      `explanation must name the put side (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when putCalendarPeak is negative (put-side peak below zero line)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 1.50, putCalendarPeak: -0.25 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "negative putCalendarPeak must fail");
+    assert.ok(
+      result.explanation.toLowerCase().includes("put"),
+      `explanation must name the put side (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when both peaks are at or below zero — explanation mentions both sides", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: -0.30, putCalendarPeak: -0.15 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "both peaks ≤ 0 must fail");
+    const exp = result.explanation.toLowerCase();
+    assert.ok(
+      exp.includes("both"),
+      `explanation must mention 'both' when both peaks are below zero (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when both peaks are exactly zero — explanation mentions both sides", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0, putCalendarPeak: 0 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "both peaks = 0 must fail");
+    const exp = result.explanation.toLowerCase();
+    assert.ok(
+      exp.includes("both"),
+      `explanation must mention 'both' when both peaks are at zero (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails with 'No calendar data' when liquidityMetrics is null", () => {
+    const stock = baseStock({ liquidityMetrics: null });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "null liquidityMetrics must fail");
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("fails with 'No calendar data' when shortCallStrike is null (no 30–60¢ call strike found)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        shortCallStrike: null,
+        callCalendarPeak: 1.50,
+        putCalendarPeak: 1.20,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "null shortCallStrike must fail — no viable call leg");
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("fails with 'No calendar data' when shortPutStrike is null (no 30–60¢ put strike found)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        shortPutStrike: null,
+        callCalendarPeak: 1.50,
+        putCalendarPeak: 1.20,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "null shortPutStrike must fail — no viable put leg");
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("fails gracefully when callCalendarPeak is null (long-chain contract missing)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        callCalendarPeak: null,
+        putCalendarPeak: 1.20,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "null callCalendarPeak must fail gracefully");
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' when callCalendarPeak is null (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("fails gracefully when putCalendarPeak is null (long-chain contract missing)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        callCalendarPeak: 1.50,
+        putCalendarPeak: null,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(result.passed, false, "null putCalendarPeak must fail gracefully");
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' when putCalendarPeak is null (got: "${result.calculatedValue}")`
     );
   });
 });
