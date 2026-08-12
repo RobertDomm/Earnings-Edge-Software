@@ -167,25 +167,23 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                       <TableCell className="max-w-[150px] truncate text-muted-foreground px-3 py-2.5" title={stock.company}>
                         {stock.company}
                       </TableCell>
-                      <TableCell className="font-mono text-right px-3 py-2.5">
-                        <span className="inline-flex items-center gap-1.5 justify-end">
-                          {formatCurrency(stock.price)}
-                          {flash && (
-                            <span
-                              key={flash.animKey}
-                              className={`delta-badge inline-block text-[10px] font-mono font-semibold px-1 py-0 leading-tight rounded-sm whitespace-nowrap ${
-                                flash.direction === "up"
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300"
-                                  : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
-                              }`}
-                            >
-                              {flash.delta >= 0 ? "+" : ""}
-                              {flash.delta.toFixed(2)}&nbsp;/&nbsp;
-                              {flash.deltaPercent >= 0 ? "+" : ""}
-                              {(flash.deltaPercent * 100).toFixed(2)}%
-                            </span>
-                          )}
-                        </span>
+                      <TableCell className="font-mono text-right px-3 py-2.5 relative">
+                        {formatCurrency(stock.price)}
+                        {flash && (
+                          <span
+                            key={flash.animKey}
+                            className={`delta-badge absolute left-full top-1/2 -translate-y-1/2 ml-1 z-20 text-[10px] font-mono font-semibold px-1 py-0 leading-tight rounded-sm whitespace-nowrap pointer-events-none ${
+                              flash.direction === "up"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300"
+                                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                            }`}
+                          >
+                            {flash.delta >= 0 ? "+" : ""}
+                            {flash.delta.toFixed(2)}&nbsp;/&nbsp;
+                            {flash.deltaPercent >= 0 ? "+" : ""}
+                            {(flash.deltaPercent * 100).toFixed(2)}%
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className={`font-mono text-right px-3 py-2.5 ${stock.dailyChangePercent > 0 ? "text-emerald-500" : stock.dailyChangePercent < 0 ? "text-red-500" : ""}`}>
                         {formatPercent(stock.dailyChangePercent)}
