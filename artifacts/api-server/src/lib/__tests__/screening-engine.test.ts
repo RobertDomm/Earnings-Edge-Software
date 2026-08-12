@@ -985,6 +985,52 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
     );
   });
 
+  // ---------------------------------------------------------------------------
+  // Asymmetric null cases — one leg is a large positive value, the other null.
+  // Confirms the filter never treats a missing leg as zero (a silent pass on
+  // the zero boundary) and always requires *both* legs to be present and positive.
+  // ---------------------------------------------------------------------------
+
+  it("fails with 'No calendar data' when callCalendarPeak=null and putCalendarPeak=+$5.00 (asymmetric null — call leg missing)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        callCalendarPeak: null,
+        putCalendarPeak: 5.00,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "callCalendarPeak=null must cause rejection even when putCalendarPeak=+$5.00 — missing leg must never be treated as zero"
+    );
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' when callCalendarPeak is null (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("fails with 'No calendar data' when callCalendarPeak=+$5.00 and putCalendarPeak=null (asymmetric null — put leg missing)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        callCalendarPeak: 5.00,
+        putCalendarPeak: null,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "putCalendarPeak=null must cause rejection even when callCalendarPeak=+$5.00 — missing leg must never be treated as zero"
+    );
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' when putCalendarPeak is null (got: "${result.calculatedValue}")`
+    );
+  });
+
   it("fails when callCalendarPeak=$0.00 and putCalendarPeak=$5.00 — call side alone drives the rejection", () => {
     const stock = baseStock({
       liquidityMetrics: calendarMetrics({ callCalendarPeak: 0.00, putCalendarPeak: 5.00 }),
