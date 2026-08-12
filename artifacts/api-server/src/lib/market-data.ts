@@ -927,6 +927,115 @@ interface UniverseCache {
 }
 
 // ---------------------------------------------------------------------------
+// Polygon earnings helper — shared by LiveMarketDataProvider and ThetaDataProvider
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches the last 4 quarterly earnings dates and realized-vol history from
+ * Polygon.io for a single ticker.  Used by LiveMarketDataProvider directly and
+ * by ThetaDataProvider as a supplement when MARKET_DATA_API_KEY is set.
+ *
+ * No rate limiter: callers are responsible for concurrency control.
+ */
+async function fetchPolygonEarningsData(
+  apiKey: string,
+  ticker: string,
+): Promise<{ nextEarningsDate: string | null; earningsIvHistory: EarningsIvRecord[] | null }> {
+  const baseUrl = "https://api.polygon.io";
+
+  async function polyFetch<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+    const url = new URL(`${baseUrl}${path}`);
+    url.searchParams.set("apiKey", apiKey);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      const body = await res.text().catch(() => "(no body)");
+      throw new Error(`Polygon ${res.status} for ${path}: ${res.statusText} — ${body}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // --- Step 1: financials (single call) ---
+  let filings: string[];
+  try {
+    const financials = await polyFetch<{
+      results?: Array<{ filing_date?: string; period_of_report_date?: string }>;
+    }>("/vX/reference/financials", {
+      ticker,
+      timeframe: "quarterly",
+      limit: "4",
+      sort: "period_of_report_date",
+      order: "desc",
+    });
+
+    filings = (financials.results ?? [])
+      .map((r) => r.filing_date ?? r.period_of_report_date)
+      .filter((d): d is string => !!d);
+  } catch {
+    return { nextEarningsDate: null, earningsIvHistory: null };
+  }
+
+  let nextEarningsDate: string | null = null;
+  if (filings.length > 0) {
+    const next = new Date(filings[0]! + "T00:00:00");
+    next.setDate(next.getDate() + 91);
+    nextEarningsDate = next.toISOString().split("T")[0]!;
+  }
+
+  if (filings.length < 4) {
+    return { nextEarningsDate, earningsIvHistory: null };
+  }
+
+  // --- Step 2: price aggregates for IV history ---
+  try {
+    const earliest = filings[filings.length - 1]!;
+    const priceFrom = dateOffsetFrom(earliest, -50);
+    const priceTo   = dateOffsetFrom(filings[0]!, -1);
+
+    const aggs = await polyFetch<PolygonAggregatesResponse>(
+      `/v2/aggs/ticker/${ticker}/range/1/day/${priceFrom}/${priceTo}`,
+      { adjusted: "true", sort: "asc", limit: "250" },
+    );
+
+    const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
+    const records: EarningsIvRecord[] = [];
+
+    for (const earningsDate of filings) {
+      const earningsTs = new Date(earningsDate + "T00:00:00").getTime();
+      const preCloses: number[]  = [];
+      const baseCloses: number[] = [];
+
+      for (const bar of bars) {
+        const barDate = new Date(bar.t!).toISOString().split("T")[0]!;
+        const daysTo = Math.round(
+          (earningsTs - new Date(barDate + "T00:00:00").getTime()) / 86_400_000,
+        );
+        if (daysTo >= 2  && daysTo <= 7)  preCloses.push(bar.c!);
+        if (daysTo >= 15 && daysTo <= 40) baseCloses.push(bar.c!);
+      }
+
+      const ivBefore   = realizedVol(preCloses);
+      const ivBaseline = realizedVol(baseCloses);
+      if (ivBefore === 0 || ivBaseline === 0) continue;
+
+      records.push({
+        earningsDate,
+        ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
+        ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
+        ivRose:           ivBefore > ivBaseline,
+      });
+    }
+
+    return {
+      nextEarningsDate,
+      earningsIvHistory: records.length >= 4 ? records : null,
+    };
+  } catch {
+    return { nextEarningsDate, earningsIvHistory: null };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // LiveMarketDataProvider
 // ---------------------------------------------------------------------------
 
@@ -1228,97 +1337,10 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     nextEarningsDate: string | null;
     earningsIvHistory: EarningsIvRecord[] | null;
   }> {
-    // --- Step 1: financials (single call) ---
-    let filings: string[];
-    try {
-      // Single call: last 4 quarterly filings — most-recent entry → nextEarningsDate,
-      // all 4 entries → earningsIvHistory.
-      const financials = await this.polygonFetch<{
-        results?: Array<{ filing_date?: string; period_of_report_date?: string }>;
-      }>("/vX/reference/financials", {
-        ticker,
-        timeframe: "quarterly",
-        limit: "4",
-        sort: "period_of_report_date",
-        order: "desc",
-      });
-
-      filings = (financials.results ?? [])
-        .map((r) => r.filing_date ?? r.period_of_report_date)
-        .filter((d): d is string => !!d);
-    } catch {
-      // Financials call failed — cannot derive either field.
-      return { nextEarningsDate: null, earningsIvHistory: null };
-    }
-
-    // Derive nextEarningsDate from the most recent filing (filings[0]).
-    // Prefer the actual filing date (closer to announcement) over period end date.
-    let nextEarningsDate: string | null = null;
-    if (filings.length > 0) {
-      const next = new Date(filings[0]! + "T00:00:00");
-      next.setDate(next.getDate() + 91); // one fiscal quarter forward
-      nextEarningsDate = next.toISOString().split("T")[0]!; // YYYY-MM-DD
-    }
-
-    if (filings.length < 4) {
-      // Not enough history for IV pattern — nextEarningsDate still populated.
-      return { nextEarningsDate, earningsIvHistory: null };
-    }
-
-    // --- Step 2: price aggregates for IV history (separate error boundary) ---
-    // A failure here must not clear nextEarningsDate derived above.
-    try {
-      const earliest = filings[filings.length - 1]!;
-      const priceFrom = dateOffsetFrom(earliest, -50); // extra buffer for baseline
-      const priceTo   = dateOffsetFrom(filings[0]!, -1);
-
-      const aggs = await this.polygonFetch<PolygonAggregatesResponse>(
-        `/v2/aggs/ticker/${ticker}/range/1/day/${priceFrom}/${priceTo}`,
-        { adjusted: "true", sort: "asc", limit: "250" }
-      );
-
-      const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
-
-      // Compute realized vol windows around each filing date.
-      const records: EarningsIvRecord[] = [];
-
-      for (const earningsDate of filings) {
-        const earningsTs = new Date(earningsDate + "T00:00:00").getTime();
-
-        // Collect closes in two windows (by timestamp proximity)
-        const preCloses: number[]  = [];
-        const baseCloses: number[] = [];
-
-        for (const bar of bars) {
-          const barDate = new Date(bar.t!).toISOString().split("T")[0]!;
-          const daysTo = Math.round(
-            (earningsTs - new Date(barDate + "T00:00:00").getTime()) / 86_400_000
-          );
-          if (daysTo >= 2  && daysTo <= 7)  preCloses.push(bar.c!);
-          if (daysTo >= 15 && daysTo <= 40) baseCloses.push(bar.c!);
-        }
-
-        const ivBefore   = realizedVol(preCloses);
-        const ivBaseline = realizedVol(baseCloses);
-
-        if (ivBefore === 0 || ivBaseline === 0) continue; // not enough price data
-
-        records.push({
-          earningsDate,
-          ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
-          ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
-          ivRose:           ivBefore > ivBaseline,
-        });
-      }
-
-      return {
-        nextEarningsDate,
-        earningsIvHistory: records.length >= 4 ? records : null,
-      };
-    } catch {
-      // Aggregates failed — IV history unavailable, but earnings date is preserved.
-      return { nextEarningsDate, earningsIvHistory: null };
-    }
+    // Delegate to the shared module-level helper (rate-limited via this.limiter
+    // indirectly: callers already hold a rate-limiter slot from the enclosing
+    // fetchStockData call, so no extra throttling is needed here).
+    return fetchPolygonEarningsData(this.apiKey, ticker);
   }
 
   private async fetchOptionsStats(ticker: string): Promise<{
@@ -2116,7 +2138,7 @@ function tdNormalizeRight(raw: string): string {
   return u; // already "C", "P", or something unexpected
 }
 export class ThetaDataProvider implements IMarketDataProvider {
-  readonly providerName = "ThetaDataProvider (ThetaData gRPC + Yahoo Finance)";
+  readonly providerName = "ThetaDataProvider (ThetaData gRPC + Yahoo Finance + Polygon earnings)";
 
   private sessionId  = "";
   private email      = "";
@@ -2134,9 +2156,20 @@ export class ThetaDataProvider implements IMarketDataProvider {
   private initError: Error | null = null;
   private readonly initPromise: Promise<void>;
 
-  constructor(private readonly apiKey: string, cacheTtlSeconds = 300) {
-    this.cacheTtlMs = cacheTtlSeconds * 1000;
-    this.initPromise = this.doInit();
+  /**
+   * Optional Polygon.io API key for fetching earnings dates and IV history.
+   * When set, Filters 2, 4, and 5 evaluate fully instead of being bypassed.
+   */
+  private readonly polygonApiKey: string | null;
+
+  constructor(
+    private readonly apiKey: string,
+    cacheTtlSeconds = 300,
+    polygonApiKey: string | null = null,
+  ) {
+    this.cacheTtlMs   = cacheTtlSeconds * 1000;
+    this.polygonApiKey = polygonApiKey;
+    this.initPromise  = this.doInit();
     // Pre-warm universe in the background after auth succeeds.
     this.initPromise
       .then(() => this.refreshUniverseCache())
@@ -2562,6 +2595,15 @@ export class ThetaDataProvider implements IMarketDataProvider {
             return 0;
           })();
 
+      // Supplement ThetaData options data with Polygon earnings data when available.
+      // This eliminates the bypass on Filters 2, 4, and 5.
+      const earningsData = this.polygonApiKey
+        ? await fetchPolygonEarningsData(this.polygonApiKey, symbol).catch(() => ({
+            nextEarningsDate: null as string | null,
+            earningsIvHistory: null as EarningsIvRecord[] | null,
+          }))
+        : { nextEarningsDate: null as string | null, earningsIvHistory: null as EarningsIvRecord[] | null };
+
       return {
         symbol,
         company:             TICKER_NAMES[symbol] ?? symbol,
@@ -2574,9 +2616,9 @@ export class ThetaDataProvider implements IMarketDataProvider {
         optionsVolume:       metrics?.optionsVolume     ?? 0,
         openInterest:        metrics?.openInterest      ?? 0,
         sector:              TICKER_SECTORS[symbol] ?? "other",
-        nextEarningsDate:    null, // not available from ThetaData on this plan
+        nextEarningsDate:    earningsData.nextEarningsDate,
         liquidityMetrics:    metrics?.liquidityMetrics ?? null,
-        earningsIvHistory:   null, // requires historical stock price data
+        earningsIvHistory:   earningsData.earningsIvHistory,
       };
     } catch {
       // Drop this ticker on error rather than zero-filling
@@ -2759,10 +2801,18 @@ export function createMarketDataProvider(): IMarketDataProvider {
           "Add your ThetaData API key to Replit Secrets."
       );
     }
-    const cacheTtl = parseInt(process.env.UNIVERSE_CACHE_TTL_SECONDS ?? "300", 10);
+    const cacheTtl     = parseInt(process.env.UNIVERSE_CACHE_TTL_SECONDS ?? "300", 10);
+    const polygonApiKey = process.env.MARKET_DATA_API_KEY ?? null;
+    if (!polygonApiKey) {
+      console.warn(
+        "[ThetaDataProvider] MARKET_DATA_API_KEY not set — earnings data unavailable. " +
+        "Filters 2, 4, and 5 will be bypassed. Set MARKET_DATA_API_KEY to a Polygon.io key to enable them."
+      );
+    }
     return new ThetaDataProvider(
       apiKey,
-      isFinite(cacheTtl) && cacheTtl > 0 ? cacheTtl : 300
+      isFinite(cacheTtl) && cacheTtl > 0 ? cacheTtl : 300,
+      polygonApiKey,
     );
   }
 
