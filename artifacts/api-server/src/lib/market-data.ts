@@ -30,6 +30,28 @@ export interface StockQuote {
   impliedVolatility: number;
   optionsVolume: number;
   openInterest: number;
+  /**
+   * Broad sector classification used by Filter 1.
+   * Values: "tech" | "finance" | "consumer" | "automotive" | "oil" |
+   *         "healthcare" | "biotech" | "defense" | "etf" | "other"
+   */
+  sector: string;
+  /**
+   * Estimated next earnings announcement date (YYYY-MM-DD), or null if unknown.
+   * Used by Filter 2. Live provider derives this from the most recent SEC filing
+   * date + 91 days; mock provider uses hardcoded realistic dates.
+   */
+  nextEarningsDate: string | null;
+  /**
+   * Options liquidity metrics computed from the ~11 DTE chain.
+   * Used by Filter 3. Null when no options data is available.
+   */
+  liquidityMetrics: OptionsLiquidityMetrics | null;
+  /**
+   * Realized-vol history around each of the last 4 earnings cycles.
+   * Used by Filter 4. Null when fewer than 4 cycles of data exist.
+   */
+  earningsIvHistory: EarningsIvRecord[] | null;
 }
 
 export interface OptionsContract {
@@ -77,6 +99,44 @@ export interface DataFreshness {
   source: "live" | "cached";
 }
 
+/**
+ * Historical IV behaviour around one past earnings announcement.
+ * The live provider approximates IV using annualized close-to-close
+ * realized volatility (the only historical vol metric available via
+ * Polygon's standard aggregates endpoint).
+ */
+export interface EarningsIvRecord {
+  /** The earnings announcement date (YYYY-MM-DD, approximated by SEC filing date). */
+  earningsDate: string;
+  /** Annualized realized vol in the ~5 trading days immediately before earnings. */
+  ivBeforeEarnings: number;
+  /** Annualized realized vol in the baseline window ~30–15 days before earnings. */
+  ivBaseline: number;
+  /** True when ivBeforeEarnings > ivBaseline (IV expanded into earnings). */
+  ivRose: boolean;
+}
+
+/**
+ * Options liquidity metrics computed from the ~11 DTE option chain.
+ * Used by Filter 3. All four sub-rules must pass for a stock to qualify.
+ */
+export interface OptionsLiquidityMetrics {
+  /** True if any expiration falls on a non-3rd-Friday date (weekly options exist). */
+  hasWeeklyOptions: boolean;
+  /** True if any bid/ask in the $0.20–$0.70 range uses sub-5-cent increments. */
+  hasPennyIncrements: boolean;
+  /** Average bid/ask spread of $0.20–$0.70 options near 11 DTE; null if no data. */
+  nearTermSpread: number | null;
+  /** Actual DTE of the near-term chain that was examined; null if no data. */
+  nearTermDte: number | null;
+  /**
+   * Median implied volatility of the near-term chain (~11 DTE); null if no data.
+   * Used by Filter 5: elevated near-term IV vs. the stock's aggregate IV confirms
+   * the options market is pricing in an upcoming earnings event.
+   */
+  nearTermIv: number | null;
+}
+
 export interface StockUniverseResult {
   stocks: StockQuote[];
   dataFreshness: DataFreshness;
@@ -110,6 +170,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.248,
     optionsVolume: 482_300,
     openInterest: 1_240_500,
+    sector: "tech",
+    nextEarningsDate: "2026-08-17", // 5 days → PASS F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451 },
+    earningsIvHistory: [ // 4/4 rise → PASS F4
+      { earningsDate: "2025-08-09", ivBaseline: 0.276, ivBeforeEarnings: 0.418, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.312, ivBeforeEarnings: 0.467, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.258, ivBeforeEarnings: 0.391, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.294, ivBeforeEarnings: 0.443, ivRose: true },
+    ],
   },
   {
     symbol: "NVDA",
@@ -122,6 +191,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.512,
     optionsVolume: 1_823_400,
     openInterest: 3_482_100,
+    sector: "tech",
+    nextEarningsDate: "2026-09-05", // 24 days → FAIL F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548 }, // FAIL F3 (spread); F5: 0.548/0.512=1.07 — no elevation (earnings 24d away)
+    earningsIvHistory: [ // 4/4 rise (solid pattern but fails F2+F3)
+      { earningsDate: "2025-08-09", ivBaseline: 0.512, ivBeforeEarnings: 0.781, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.548, ivBeforeEarnings: 0.824, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.487, ivBeforeEarnings: 0.723, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.524, ivBeforeEarnings: 0.798, ivRose: true },
+    ],
   },
   {
     symbol: "MSFT",
@@ -134,6 +212,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.198,
     optionsVolume: 238_700,
     openInterest: 892_300,
+    sector: "tech",
+    nextEarningsDate: "2026-09-10", // 29 days → FAIL F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214 }, // F5: 0.214/0.198=1.08 — flat (earnings 29d away)
+    earningsIvHistory: [ // 4/4 rise (would qualify if earnings were in window)
+      { earningsDate: "2025-08-09", ivBaseline: 0.198, ivBeforeEarnings: 0.281, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.214, ivBeforeEarnings: 0.306, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.189, ivBeforeEarnings: 0.271, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.203, ivBeforeEarnings: 0.289, ivRose: true },
+    ],
   },
   {
     symbol: "TSLA",
@@ -146,6 +233,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.672,
     optionsVolume: 2_341_800,
     openInterest: 4_821_600,
+    sector: "automotive",
+    nextEarningsDate: "2026-08-24", // 12 days → PASS F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948 }, // F5: 0.948/0.672=1.41 ✓ (but fails F4)
+    earningsIvHistory: [ // 3/4 rise → FAIL F4 (IV dropped one cycle)
+      { earningsDate: "2025-08-09", ivBaseline: 0.724, ivBeforeEarnings: 0.981, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.681, ivBeforeEarnings: 0.823, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.752, ivBeforeEarnings: 0.709, ivRose: false }, // IV dropped — unusual
+      { earningsDate: "2026-05-08", ivBaseline: 0.698, ivBeforeEarnings: 0.887, ivRose: true },
+    ],
   },
   {
     symbol: "META",
@@ -158,6 +254,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.341,
     optionsVolume: 412_900,
     openInterest: 1_102_400,
+    sector: "tech",
+    nextEarningsDate: "2026-08-19", // 7 days → PASS F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521 }, // F5: 0.521/0.341=1.53 ✓
+    earningsIvHistory: [ // 4/4 rise → PASS F4
+      { earningsDate: "2025-08-09", ivBaseline: 0.342, ivBeforeEarnings: 0.524, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.378, ivBeforeEarnings: 0.563, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.321, ivBeforeEarnings: 0.487, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.356, ivBeforeEarnings: 0.542, ivRose: true },
+    ],
   },
   {
     symbol: "AMZN",
@@ -170,6 +275,10 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.274,
     optionsVolume: 387_200,
     openInterest: 1_048_300,
+    sector: "tech",
+    nextEarningsDate: "2026-08-30", // 18 days → FAIL F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281 }, // F5: 0.281/0.274=1.03 — flat (earnings 18d away)
+    earningsIvHistory: null, // earnings outside window; skip for mock clarity
   },
   {
     symbol: "AMD",
@@ -182,6 +291,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.594,
     optionsVolume: 1_284_700,
     openInterest: 2_937_100,
+    sector: "tech",
+    nextEarningsDate: "2026-08-14", // 2 days → PASS F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847 }, // F5: 0.847/0.594=1.43 ✓
+    earningsIvHistory: [ // 4/4 rise → PASS F4
+      { earningsDate: "2025-08-09", ivBaseline: 0.581, ivBeforeEarnings: 0.842, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.623, ivBeforeEarnings: 0.908, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.547, ivBeforeEarnings: 0.781, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.601, ivBeforeEarnings: 0.872, ivRose: true },
+    ],
   },
   {
     symbol: "SPY",
@@ -194,6 +312,10 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.142,
     optionsVolume: 4_821_300,
     openInterest: 12_483_200,
+    sector: "etf",
+    nextEarningsDate: null, // ETF — no earnings → FAIL F2
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.05, nearTermDte: 7, nearTermIv: 0.145 }, // F5: 0.145/0.142=1.02 — flat (ETF, no earnings)
+    earningsIvHistory: null, // ETF — no earnings cycle
   },
   {
     symbol: "GOOGL",
@@ -206,6 +328,15 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.231,
     optionsVolume: 298_100,
     openInterest: 748_600,
+    sector: "tech",
+    nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (boundary)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419 }, // F5: 0.419/0.231=1.81 ✓
+    earningsIvHistory: [ // 4/4 rise → PASS F4
+      { earningsDate: "2025-08-09", ivBaseline: 0.271, ivBeforeEarnings: 0.413, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.303, ivBeforeEarnings: 0.447, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.251, ivBeforeEarnings: 0.383, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.285, ivBeforeEarnings: 0.422, ivRose: true },
+    ],
   },
   {
     symbol: "COIN",
@@ -218,6 +349,59 @@ const MOCK_STOCKS: StockQuote[] = [
     impliedVolatility: 0.891,
     optionsVolume: 892_400,
     openInterest: 1_823_700,
+    sector: "tech",
+    nextEarningsDate: "2026-09-01", // 20 days → FAIL F2
+    liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null }, // FAIL F3; no near-term IV
+    earningsIvHistory: null,
+  },
+  // --- Sector-excluded demo stocks (fail Filter 1 in mock mode) ---
+  {
+    symbol: "XOM",
+    company: "Exxon Mobil Corporation",
+    price: 118.42,
+    dailyChangePercent: 0.38,
+    volume: 16_820_400,
+    avgVolume: 15_340_000,
+    marketCap: 472_000_000_000,
+    impliedVolatility: 0.224,
+    optionsVolume: 312_100,
+    openInterest: 892_400,
+    sector: "oil",
+    nextEarningsDate: null,
+    liquidityMetrics: null,
+    earningsIvHistory: null,
+  },
+  {
+    symbol: "UNH",
+    company: "UnitedHealth Group Incorporated",
+    price: 492.17,
+    dailyChangePercent: -0.82,
+    volume: 4_218_300,
+    avgVolume: 3_940_000,
+    marketCap: 456_000_000_000,
+    impliedVolatility: 0.284,
+    optionsVolume: 98_400,
+    openInterest: 312_700,
+    sector: "healthcare",
+    nextEarningsDate: null,
+    liquidityMetrics: null,
+    earningsIvHistory: null,
+  },
+  {
+    symbol: "AMGN",
+    company: "Amgen Inc.",
+    price: 312.84,
+    dailyChangePercent: 1.14,
+    volume: 3_128_400,
+    avgVolume: 2_840_000,
+    marketCap: 168_000_000_000,
+    impliedVolatility: 0.261,
+    optionsVolume: 84_200,
+    openInterest: 248_300,
+    sector: "biotech",
+    nextEarningsDate: null,
+    liquidityMetrics: null,
+    earningsIvHistory: null,
   },
 ];
 
@@ -468,6 +652,45 @@ const TICKER_NAMES: Record<string, string> = {
   SPXL: "Direxion Daily S&P 500 Bull 3X Shares",
 };
 
+/**
+ * Sector classification for every symbol in the screener universe.
+ * Used by Filter 1 to exclude oil, biotech, healthcare, and military defense.
+ *
+ * Excluded sectors: "oil" | "biotech" | "healthcare" | "defense"
+ */
+const TICKER_SECTORS: Record<string, string> = {
+  // Mega-cap tech
+  AAPL: "tech", MSFT: "tech", NVDA: "tech", GOOGL: "tech", GOOG: "tech",
+  AMZN: "tech", META: "tech",
+  // Automotive / EV
+  TSLA: "automotive", RIVN: "automotive", LCID: "automotive",
+  NIO: "automotive", XPEV: "automotive",
+  // Semiconductors
+  AMD: "tech", INTC: "tech", QCOM: "tech", AVGO: "tech", MU: "tech",
+  AMAT: "tech", LRCX: "tech", KLAC: "tech", TSM: "tech",
+  // Finance
+  JPM: "finance", BAC: "finance", GS: "finance", MS: "finance",
+  C: "finance", WFC: "finance", BLK: "finance", SCHW: "finance",
+  // Healthcare (insurance + broad pharma) — EXCLUDED
+  UNH: "healthcare", JNJ: "healthcare", MRK: "healthcare", PFE: "healthcare",
+  // Biotech / biopharmaceutical — EXCLUDED
+  LLY: "biotech", ABBV: "biotech", AMGN: "biotech",
+  // Consumer / Retail
+  WMT: "consumer", COST: "consumer", HD: "consumer", TGT: "consumer",
+  NKE: "consumer", SBUX: "consumer",
+  // Oil & Energy — EXCLUDED
+  XOM: "oil", CVX: "oil", OXY: "oil",
+  // Tech / fintech / high-vol
+  COIN: "tech", MSTR: "tech", PLTR: "tech", RBLX: "tech", SNAP: "tech",
+  UBER: "tech", LYFT: "tech", HOOD: "tech",
+  // China tech
+  BIDU: "tech", BABA: "tech", JD: "tech",
+  // ETFs
+  SPY: "etf", QQQ: "etf", IWM: "etf", ARKK: "etf", GLD: "etf",
+  SLV: "etf", TLT: "etf", HYG: "etf", VIXY: "etf", SQQQ: "etf",
+  TQQQ: "etf", SPXS: "etf", SPXL: "etf",
+};
+
 // ---------------------------------------------------------------------------
 // Polygon.io response shapes (only fields the provider reads)
 // ---------------------------------------------------------------------------
@@ -487,7 +710,7 @@ interface PolygonSnapshotResponse {
 }
 
 interface PolygonAggregatesResponse {
-  results?: Array<{ v?: number }>;
+  results?: Array<{ v?: number; c?: number; t?: number }>;
   status?: string;
 }
 
@@ -555,6 +778,53 @@ function dateOffset(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return d.toISOString().split("T")[0]!;
+}
+
+/**
+ * Returns true if the given YYYY-MM-DD date is the 3rd Friday of its month.
+ * Monthly equity options expire on the 3rd Friday; anything else is a weekly.
+ */
+function isThirdFriday(dateStr: string): boolean {
+  const d = new Date(dateStr + "T12:00:00Z");
+  if (d.getUTCDay() !== 5) return false; // not a Friday
+  const day = d.getUTCDate();
+  return day >= 15 && day <= 21;
+}
+
+/**
+ * Returns true if `price` is NOT an exact multiple of $0.05
+ * (i.e., uses penny-increment quoting rather than nickel-only).
+ */
+function isPennyIncrement(price: number): boolean {
+  return Math.round(price * 100) % 5 !== 0;
+}
+
+/**
+ * Returns a YYYY-MM-DD string offset by `days` from a given ISO date string.
+ * Positive = forward, negative = backward.
+ */
+function dateOffsetFrom(isoDate: string, days: number): string {
+  const d = new Date(isoDate + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0]!;
+}
+
+/**
+ * Computes annualized close-to-close realized volatility from an array of
+ * daily closing prices. Returns 0 when there are fewer than 3 data points.
+ */
+function realizedVol(closes: number[]): number {
+  if (closes.length < 3) return 0;
+  const logReturns: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const prev = closes[i - 1]!;
+    const cur  = closes[i]!;
+    if (prev > 0 && cur > 0) logReturns.push(Math.log(cur / prev));
+  }
+  if (logReturns.length < 2) return 0;
+  const mean = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
+  const variance = logReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / logReturns.length;
+  return Math.sqrt(variance * 252); // annualize: √(daily variance × 252 trading days)
 }
 
 // ---------------------------------------------------------------------------
@@ -869,10 +1139,129 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
    * Throws on failure so the caller can drop this ticker rather than
    * filling filter inputs with zeros.
    */
+  /**
+   * Fetches the last 4 quarterly earnings dates and 220 days of daily price
+   * data, then computes annualized realized-volatility for the pre-earnings
+   * window (days −7 to −2 before earnings) vs. a baseline window (days −40
+   * to −15 before earnings) for each cycle.
+   *
+   * Returns an array of 4 EarningsIvRecord entries, or null if fewer than 4
+   * cycles of usable data exist. Degrades gracefully on any API error.
+   *
+   * NOTE: Realized volatility is used as an honest proxy for implied volatility
+   * because Polygon's standard aggregates endpoint does not expose historical
+   * options IV. RV and IV are directionally correlated around earnings events.
+   */
+  private async fetchEarningsIvHistory(ticker: string): Promise<EarningsIvRecord[] | null> {
+    try {
+      // Step 1: get last 4 quarterly filing dates (≈ earnings announcement dates)
+      const financials = await this.polygonFetch<{
+        results?: Array<{ filing_date?: string; period_of_report_date?: string }>;
+      }>("/vX/reference/financials", {
+        ticker,
+        timeframe: "quarterly",
+        limit: "4",
+        sort: "period_of_report_date",
+        order: "desc",
+      });
+
+      const filings = (financials.results ?? [])
+        .map((r) => r.filing_date ?? r.period_of_report_date)
+        .filter((d): d is string => !!d);
+
+      if (filings.length < 4) return null;
+
+      // Step 2: single price-data fetch covering the full 220-day window
+      const earliest = filings[filings.length - 1]!;
+      const priceFrom = dateOffsetFrom(earliest, -50); // extra buffer for baseline
+      const priceTo   = dateOffsetFrom(filings[0]!, -1);
+
+      const aggs = await this.polygonFetch<PolygonAggregatesResponse>(
+        `/v2/aggs/ticker/${ticker}/range/1/day/${priceFrom}/${priceTo}`,
+        { adjusted: "true", sort: "asc", limit: "250" }
+      );
+
+      const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
+
+      // Step 3: compute realized vol windows around each filing date
+      const records: EarningsIvRecord[] = [];
+
+      for (const earningsDate of filings) {
+        const earningsTs = new Date(earningsDate + "T00:00:00").getTime();
+
+        // Collect closes in two windows (by timestamp proximity)
+        const preCloses: number[]  = [];
+        const baseCloses: number[] = [];
+
+        for (const bar of bars) {
+          const barDate = new Date(bar.t!).toISOString().split("T")[0]!;
+          const daysTo = Math.round(
+            (earningsTs - new Date(barDate + "T00:00:00").getTime()) / 86_400_000
+          );
+          if (daysTo >= 2  && daysTo <= 7)  preCloses.push(bar.c!);
+          if (daysTo >= 15 && daysTo <= 40) baseCloses.push(bar.c!);
+        }
+
+        const ivBefore   = realizedVol(preCloses);
+        const ivBaseline = realizedVol(baseCloses);
+
+        if (ivBefore === 0 || ivBaseline === 0) continue; // not enough price data
+
+        records.push({
+          earningsDate,
+          ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
+          ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
+          ivRose:           ivBefore > ivBaseline,
+        });
+      }
+
+      return records.length >= 4 ? records : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Estimate the next earnings date for a ticker by fetching its most recent
+   * quarterly filing date from Polygon's financials endpoint and projecting
+   * forward ~91 days (one fiscal quarter).
+   *
+   * Returns null on any error so the caller can degrade gracefully — a null
+   * nextEarningsDate causes Filter 2 (upcoming earnings) to FAIL for that stock.
+   */
+  private async fetchNextEarningsDate(ticker: string): Promise<string | null> {
+    try {
+      const data = await this.polygonFetch<{
+        results?: Array<{ filing_date?: string; period_of_report_date?: string }>;
+      }>("/vX/reference/financials", {
+        ticker,
+        timeframe: "quarterly",
+        limit: "1",
+        sort: "period_of_report_date",
+        order: "desc",
+      });
+
+      const result = data.results?.[0];
+      if (!result) return null;
+
+      // Prefer the actual filing date (closer to earnings announcement)
+      // over the period end date (which is weeks earlier).
+      const baseDate = result.filing_date ?? result.period_of_report_date;
+      if (!baseDate) return null;
+
+      const next = new Date(baseDate + "T00:00:00");
+      next.setDate(next.getDate() + 91); // one fiscal quarter forward
+      return next.toISOString().split("T")[0]; // YYYY-MM-DD
+    } catch {
+      return null;
+    }
+  }
+
   private async fetchOptionsStats(ticker: string): Promise<{
     optionsVolume: number;
     openInterest: number;
     impliedVolatility: number;
+    liquidityMetrics: OptionsLiquidityMetrics;
   }> {
     const data = await this.polygonFetch<PolygonOptionsResponse>(
       `/v3/snapshot/options/${ticker}`,
@@ -894,17 +1283,83 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     let openInterest = 0;
     const ivValues: number[] = [];
 
+    // --- Liquidity metrics (Filter 3) ---
+    const expiryDates = new Set<string>();
+    const byExpiry = new Map<string, PolygonOptionsResult[]>();
+
     for (const r of results) {
       optionsVolume += safeNum(r.day?.volume);
       openInterest += safeNum(r.open_interest);
       const iv = safeNum(r.implied_volatility);
       if (iv > 0) ivValues.push(iv);
+
+      const expiry = r.details?.expiration_date;
+      if (expiry) {
+        expiryDates.add(expiry);
+        if (!byExpiry.has(expiry)) byExpiry.set(expiry, []);
+        byExpiry.get(expiry)!.push(r);
+      }
+    }
+
+    // Rule 1 — weekly options: any Friday that is NOT the 3rd Friday of the month
+    const hasWeeklyOptions = [...expiryDates].some((d) => !isThirdFriday(d));
+
+    // Rule 2 — penny increments: any $0.20–$0.70 option with a non-nickel bid or ask
+    const hasPennyIncrements = results.some((r) => {
+      const bid = r.last_quote?.bid ?? 0;
+      const ask = r.last_quote?.ask ?? 0;
+      const mid = (bid + ask) / 2;
+      return mid >= 0.2 && mid <= 0.7 && (isPennyIncrement(bid) || isPennyIncrement(ask));
+    });
+
+    // Rules 3 & 4 — find the expiry closest to 11 DTE
+    const todayMs = new Date().setHours(0, 0, 0, 0);
+    let nearTermExpiry: string | null = null;
+    let nearTermDte: number | null = null;
+    let minDiff = Infinity;
+
+    for (const expiry of expiryDates) {
+      const dte = Math.round(
+        (new Date(expiry + "T00:00:00").getTime() - todayMs) / 86_400_000
+      );
+      if (dte < 0) continue;
+      const diff = Math.abs(dte - 11);
+      if (diff < minDiff) { minDiff = diff; nearTermExpiry = expiry; nearTermDte = dte; }
+    }
+
+    let nearTermSpread: number | null = null;
+    if (nearTermExpiry) {
+      const spreads = (byExpiry.get(nearTermExpiry) ?? [])
+        .filter((r) => {
+          const bid = r.last_quote?.bid ?? 0;
+          const ask = r.last_quote?.ask ?? 0;
+          return (bid + ask) / 2 >= 0.2 && (bid + ask) / 2 <= 0.7 && ask > bid;
+        })
+        .map((r) => r.last_quote!.ask! - r.last_quote!.bid!);
+
+      if (spreads.length > 0) {
+        nearTermSpread = parseFloat(
+          (spreads.reduce((a, b) => a + b, 0) / spreads.length).toFixed(3)
+        );
+      }
+    }
+
+    // Near-term IV: median IV from contracts in the near-term expiry bucket
+    let nearTermIv: number | null = null;
+    if (nearTermExpiry) {
+      const nearIvValues = (byExpiry.get(nearTermExpiry) ?? [])
+        .map((r) => safeNum(r.implied_volatility))
+        .filter((iv) => iv > 0);
+      if (nearIvValues.length > 0) {
+        nearTermIv = parseFloat(median(nearIvValues).toFixed(4));
+      }
     }
 
     return {
       optionsVolume,
       openInterest,
       impliedVolatility: median(ivValues),
+      liquidityMetrics: { hasWeeklyOptions, hasPennyIncrements, nearTermSpread, nearTermDte, nearTermIv },
     };
   }
 
@@ -961,9 +1416,11 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             safeNum(snap.day?.c) ||
             safeNum(snap.prevDay?.c);
 
-          const [optStats, avgVol] = await Promise.all([
+          const [optStats, avgVol, nextEarningsDate, earningsIvHistory] = await Promise.all([
             this.fetchOptionsStats(snap.ticker),
             this.fetchAvgVolume(snap.ticker),
+            this.fetchNextEarningsDate(snap.ticker),
+            this.fetchEarningsIvHistory(snap.ticker),
           ]);
 
           enriched.push({
@@ -977,6 +1434,10 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             impliedVolatility: parseFloat(optStats.impliedVolatility.toFixed(4)),
             optionsVolume: optStats.optionsVolume,
             openInterest: optStats.openInterest,
+            sector: TICKER_SECTORS[snap.ticker] ?? "other",
+            nextEarningsDate,
+            liquidityMetrics: optStats.liquidityMetrics,
+            earningsIvHistory,
           });
         } catch {
           // Enrichment failed — drop this ticker rather than zero-filling.
@@ -994,12 +1455,14 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
 
   async getStockQuote(symbol: string): Promise<StockQuote | null> {
     try {
-      const [snapData, optStats, avgVol] = await Promise.all([
+      const [snapData, optStats, avgVol, nextEarningsDate, earningsIvHistory] = await Promise.all([
         this.polygonFetch<{ ticker?: PolygonTickerSnapshot }>(
           `/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
         ),
         this.fetchOptionsStats(symbol),
         this.fetchAvgVolume(symbol),
+        this.fetchNextEarningsDate(symbol),
+        this.fetchEarningsIvHistory(symbol),
       ]);
 
       const snap = snapData.ticker;
@@ -1022,6 +1485,10 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         impliedVolatility: parseFloat(optStats.impliedVolatility.toFixed(4)),
         optionsVolume: optStats.optionsVolume,
         openInterest: optStats.openInterest,
+        sector: TICKER_SECTORS[symbol] ?? "other",
+        nextEarningsDate,
+        liquidityMetrics: optStats.liquidityMetrics,
+        earningsIvHistory,
       };
     } catch {
       return null;

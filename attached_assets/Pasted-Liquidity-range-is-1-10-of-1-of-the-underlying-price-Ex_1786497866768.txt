@@ -1,0 +1,109 @@
+Liquidity range is 1/10 of 1% of the underlying price
+
+Example: If XYZ Stock is trading for 1,000, the liquidity spread can be up to 1.00 
+
+How to Identify Liquid Options
+
+One of the easiest ways to improve your trading results is to avoid illiquid options.
+
+An option may look attractive on paper, but if you cannot enter and exit efficiently, the bid/ask spread becomes an invisible commission that reduces your profits on every trade.
+
+The goal is to trade stocks where market makers compete for your order, helping keep spreads tight.
+
+Rule #1: Weekly Options Only
+
+Requirement
+
+✅ The stock must have weekly options.
+
+Why?
+
+Weekly options attract more traders, creating higher volume and tighter bid/ask spreads.
+
+Monthly-only options generally have less activity and wider spreads, making them more expensive to trade.
+
+Rule #2: Avoid 5-Cent Markets
+
+Requirement
+
+The option quotes should not move exclusively in $0.05 increments.
+
+Look for quotes with penny increments, such as:
+
+✅ $0.31
+✅ $0.44
+✅ $0.57
+✅ $0.83
+
+Avoid option chains where every quote looks like:
+
+❌ $0.30
+❌ $0.35
+❌ $0.40
+❌ $0.45
+
+Why?
+
+When market makers quote only in 5-cent increments, it usually indicates lower liquidity.
+
+Penny pricing generally means:
+
+
+
+
+
+More competition
+
+
+
+Better fills
+
+
+
+Lower trading costs
+
+Rule #3: Test the Short-Term Option Chain
+
+I typically evaluate the 11 DTE option chain.
+
+Specifically, I examine options trading between approximately $0.30 and $0.60.
+
+Why?
+
+This is where Earnings Edge typically enters positions. I want to know how liquid the options are where I will actually be trading—not six months out.
+
+Rule #4: Maximum Bid/Ask Spread
+
+Stock Price Maximum Spread: 
+
+$0–$100 $0.10 
+
+$100–$250 $0.30 
+
+$250–$500 $0.40 
+
+$500–$1,000 $0.50
+
+If the spread exceeds these limits, I remove the stock from consideration.
+
+Why These Numbers?
+
+Higher-priced stocks naturally have wider option spreads.
+
+A $0.30 spread on a $250 stock is proportionally similar to a $0.10 spread on a $50 stock.
+
+The goal is not to eliminate spreads. The goal is to avoid paying unnecessary transaction costs.
+
+Summary
+
+Before adding any stock to the Earnings Edge watchlist, ask four questions:
+
+✅ Does it have weekly options?
+
+✅ Are the options quoted in penny increments rather than only 5-cent increments?
+
+✅ Does the 11 DTE option chain show good liquidity around the $0.30–$0.60 options?
+
+✅ Does the bid/ask spread meet the maximum spread requirements?
+
+If the answer to any of these questions is no, I simply move on to the next stock.

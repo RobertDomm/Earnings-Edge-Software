@@ -54,93 +54,287 @@ export interface IFilterRule {
 // Each rule must implement IFilterRule.
 // ---------------------------------------------------------------------------
 
-/** Filter 1 — Placeholder: Minimum Implied Volatility */
+// ---------------------------------------------------------------------------
+// Filter 1 — Sector Exclusion
+//
+// Oil, biotech, healthcare, and military defense stocks are excluded because
+// their price action is driven more by sector-specific catalysts (oil reports,
+// FDA approvals, government contracts) than by earnings — making them unsuitable
+// for this system's strategy.
+// ---------------------------------------------------------------------------
+
+const EXCLUDED_SECTORS = new Set(["oil", "biotech", "healthcare", "defense"]);
+
+const SECTOR_LABELS: Record<string, string> = {
+  oil:        "Oil & Energy",
+  biotech:    "Biotech",
+  healthcare: "Healthcare",
+  defense:    "Military Defense",
+  tech:       "Technology",
+  finance:    "Finance",
+  consumer:   "Consumer",
+  automotive: "Automotive",
+  etf:        "ETF",
+  other:      "Other",
+};
+
 const filter1: IFilterRule = {
-  name: "Filter 1 — Implied Volatility Floor",
+  name: "Filter 1 — Sector Exclusion",
   evaluate(stock) {
-    const threshold = 0.2;
-    const passed = stock.impliedVolatility >= threshold;
+    const sector = stock.sector ?? "other";
+    const excluded = EXCLUDED_SECTORS.has(sector);
+    const passed = !excluded;
+    const sectorLabel = SECTOR_LABELS[sector] ?? sector;
     return {
       name: this.name,
       passed,
-      calculatedValue: `${(stock.impliedVolatility * 100).toFixed(1)}%`,
-      threshold: `>= ${(threshold * 100).toFixed(0)}%`,
+      calculatedValue: sectorLabel,
+      threshold: "Not oil, biotech, healthcare, or military defense",
       explanation: passed
-        ? `IV of ${(stock.impliedVolatility * 100).toFixed(1)}% meets the minimum volatility floor.`
-        : `IV of ${(stock.impliedVolatility * 100).toFixed(1)}% is below the minimum threshold.`,
+        ? `${stock.symbol} (${sectorLabel}) is not in an excluded sector — eligible for screening.`
+        : `${stock.symbol} is in the ${sectorLabel} sector. Excluded because price action relies on sector-specific catalysts (oil reports, FDA approvals, government contracts) rather than earnings.`,
     };
   },
 };
 
-/** Filter 2 — Placeholder: Options Volume Threshold */
+// ---------------------------------------------------------------------------
+// Filter 2 — Upcoming Earnings (within 14 days)
+//
+// The strategy trades options on stocks coming into an earnings announcement.
+// IV typically expands in the days before earnings, making options attractive.
+// Stocks with no earnings date (ETFs, unknowns) do not qualify.
+// ---------------------------------------------------------------------------
+
+const EARNINGS_WINDOW_DAYS = 14;
+
 const filter2: IFilterRule = {
-  name: "Filter 2 — Options Volume",
+  name: "Filter 2 — Upcoming Earnings",
   evaluate(stock) {
-    const threshold = 200_000;
-    const passed = stock.optionsVolume >= threshold;
+    if (!stock.nextEarningsDate) {
+      return {
+        name: this.name,
+        passed: false,
+        calculatedValue: "No earnings date",
+        threshold: `Within ${EARNINGS_WINDOW_DAYS} days`,
+        explanation: `No upcoming earnings date found for ${stock.symbol} — cannot confirm an earnings catalyst within the window.`,
+      };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const earningsDate = new Date(stock.nextEarningsDate + "T00:00:00");
+    const daysUntil = Math.round(
+      (earningsDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    const passed = daysUntil >= 0 && daysUntil <= EARNINGS_WINDOW_DAYS;
+
+    const dayLabel =
+      daysUntil === 0
+        ? "today"
+        : daysUntil === 1
+        ? "tomorrow"
+        : `in ${daysUntil} day${daysUntil !== 1 ? "s" : ""}`;
+
     return {
       name: this.name,
       passed,
-      calculatedValue: stock.optionsVolume.toLocaleString(),
-      threshold: `>= ${threshold.toLocaleString()}`,
+      calculatedValue:
+        daysUntil < 0
+          ? `${Math.abs(daysUntil)}d ago`
+          : `${daysUntil}d (${stock.nextEarningsDate})`,
+      threshold: `Within ${EARNINGS_WINDOW_DAYS} days`,
       explanation: passed
-        ? `Options volume of ${stock.optionsVolume.toLocaleString()} meets the liquidity requirement.`
-        : `Options volume of ${stock.optionsVolume.toLocaleString()} is below the required liquidity threshold.`,
+        ? `${stock.symbol} reports earnings ${dayLabel} (${stock.nextEarningsDate}) — IV expansion opportunity.`
+        : daysUntil < 0
+        ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago (${stock.nextEarningsDate}). Next cycle not yet estimated.`
+        : `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}), which is outside the ${EARNINGS_WINDOW_DAYS}-day entry window.`,
     };
   },
 };
 
-/** Filter 3 — Placeholder: Minimum Stock Volume */
+// ---------------------------------------------------------------------------
+// Filter 3 — Options Liquidity
+//
+// All four sub-rules from the Earnings Edge liquidity checklist must pass:
+//   1. Weekly options available (tighter spreads, more volume)
+//   2. Penny-increment quoting (not nickel-only — indicates deeper market)
+//   3. Near-term ($0.30–$0.60) options have a spread within the price-tier limit
+//
+// Max spread table (matching the user's spec):
+//   $0–$100   → $0.10
+//   $100–$250 → $0.30
+//   $250–$500 → $0.40
+//   $500–$1k  → $0.50
+// ---------------------------------------------------------------------------
+
+function maxSpreadForPrice(stockPrice: number): number {
+  if (stockPrice < 100)  return 0.10;
+  if (stockPrice < 250)  return 0.30;
+  if (stockPrice < 500)  return 0.40;
+  return 0.50; // $500–$1,000 (screener universe cap)
+}
+
 const filter3: IFilterRule = {
-  name: "Filter 3 — Stock Liquidity",
+  name: "Filter 3 — Options Liquidity",
   evaluate(stock) {
-    const threshold = 10_000_000;
-    const passed = stock.volume >= threshold;
+    const lm = stock.liquidityMetrics;
+
+    if (!lm) {
+      return {
+        name: this.name,
+        passed: false,
+        calculatedValue: "No options data",
+        threshold: "Weekly • Penny • Spread within limit",
+        explanation: `No options liquidity data available for ${stock.symbol}.`,
+      };
+    }
+
+    const maxSpread = maxSpreadForPrice(stock.price);
+    const spreadOk = lm.nearTermSpread !== null && lm.nearTermSpread <= maxSpread;
+    const passed = lm.hasWeeklyOptions && lm.hasPennyIncrements && spreadOk;
+
+    const dteNote = lm.nearTermDte !== null ? ` (${lm.nearTermDte} DTE chain)` : "";
+
+    const checks = [
+      lm.hasWeeklyOptions   ? "Weekly✓"  : "Weekly✗",
+      lm.hasPennyIncrements ? "Penny✓"   : "Penny✗",
+      lm.nearTermSpread !== null
+        ? `Spread $${lm.nearTermSpread.toFixed(2)}${spreadOk ? "✓" : "✗"}`
+        : "Spread —",
+    ].join("  ");
+
+    const failReasons: string[] = [];
+    if (!lm.hasWeeklyOptions)
+      failReasons.push("No weekly options — monthly-only expirations tend to have wider spreads.");
+    if (!lm.hasPennyIncrements)
+      failReasons.push("Options quoted only in $0.05 increments, indicating lower market-maker competition.");
+    if (!spreadOk) {
+      failReasons.push(
+        lm.nearTermSpread !== null
+          ? `Avg spread $${lm.nearTermSpread.toFixed(2)}${dteNote} exceeds the $${maxSpread.toFixed(2)} limit for a $${stock.price.toFixed(0)} stock.`
+          : `No near-term options found in the $0.30–$0.60 range${dteNote}.`
+      );
+    }
+
     return {
       name: this.name,
       passed,
-      calculatedValue: stock.volume.toLocaleString(),
-      threshold: `>= ${threshold.toLocaleString()}`,
+      calculatedValue: checks,
+      threshold: `Weekly • Penny • Spread ≤ $${maxSpread.toFixed(2)}`,
       explanation: passed
-        ? `Daily volume of ${stock.volume.toLocaleString()} demonstrates sufficient liquidity.`
-        : `Daily volume of ${stock.volume.toLocaleString()} is below the minimum liquidity threshold.`,
+        ? `${stock.symbol} passes all liquidity checks${dteNote}: weekly options available, penny-increment quotes, avg spread $${lm.nearTermSpread!.toFixed(2)} vs. $${maxSpread.toFixed(2)} limit.`
+        : failReasons.join(" "),
     };
   },
 };
 
-/** Filter 4 — Placeholder: Open Interest Requirement */
+// ---------------------------------------------------------------------------
+// Filter 4 — IV Rise into Earnings (last 4 cycles)
+//
+// The strategy profits from pre-earnings IV expansion. A stock only qualifies
+// if IV consistently rises in the days leading up to each of its last 4
+// earnings events. A single cycle where IV failed to expand means the stock
+// does not reliably exhibit the pattern and should be skipped.
+//
+// In the live provider, "IV" is approximated by annualized close-to-close
+// realized volatility computed from Polygon stock aggregates — the best proxy
+// available without historical options IV data.
+// ---------------------------------------------------------------------------
+
+const REQUIRED_IV_CYCLES = 4;
+
 const filter4: IFilterRule = {
-  name: "Filter 4 — Open Interest",
+  name: "Filter 4 — IV Rise into Earnings",
   evaluate(stock) {
-    const threshold = 500_000;
-    const passed = stock.openInterest >= threshold;
+    const history = stock.earningsIvHistory;
+
+    if (!history || history.length < REQUIRED_IV_CYCLES) {
+      return {
+        name: this.name,
+        passed: false,
+        calculatedValue: `${history?.length ?? 0}/${REQUIRED_IV_CYCLES} cycles`,
+        threshold: `${REQUIRED_IV_CYCLES}/${REQUIRED_IV_CYCLES} cycles show IV expansion`,
+        explanation: `Insufficient earnings history for ${stock.symbol} — need ${REQUIRED_IV_CYCLES} quarters of data, found ${history?.length ?? 0}.`,
+      };
+    }
+
+    const risingCycles = history.filter((r) => r.ivRose).length;
+    const passed = risingCycles === REQUIRED_IV_CYCLES;
+
+    // Build per-cycle detail: "Aug✓ Nov✓ Feb✓ May✓"
+    const monthAbbr = (d: string) =>
+      new Date(d + "T00:00:00").toLocaleString("en-US", { month: "short" });
+    const cycleDetail = history
+      .map((r) => `${monthAbbr(r.earningsDate)}${r.ivRose ? "✓" : "✗"}`)
+      .join(" ");
+
+    const failCycles = history
+      .filter((r) => !r.ivRose)
+      .map(
+        (r) =>
+          `${monthAbbr(r.earningsDate)} ${r.earningsDate.slice(0, 4)} (RV ${(r.ivBaseline * 100).toFixed(1)}% → ${(r.ivBeforeEarnings * 100).toFixed(1)}%)`
+      );
+
     return {
       name: this.name,
       passed,
-      calculatedValue: stock.openInterest.toLocaleString(),
-      threshold: `>= ${threshold.toLocaleString()}`,
+      calculatedValue: `${risingCycles}/${REQUIRED_IV_CYCLES}  ${cycleDetail}`,
+      threshold: `${REQUIRED_IV_CYCLES}/${REQUIRED_IV_CYCLES} cycles show IV expansion`,
       explanation: passed
-        ? `Open interest of ${stock.openInterest.toLocaleString()} meets the requirement.`
-        : `Open interest of ${stock.openInterest.toLocaleString()} is below the threshold.`,
+        ? `${stock.symbol} showed IV expansion into earnings in all ${REQUIRED_IV_CYCLES} of the last ${REQUIRED_IV_CYCLES} cycles (${cycleDetail}) — consistent pre-earnings IV run-up confirmed.`
+        : `${stock.symbol} failed to show IV expansion in ${REQUIRED_IV_CYCLES - risingCycles} cycle(s): ${failCycles.join("; ")}. Inconsistent pre-earnings IV behaviour makes this a poor candidate for this strategy.`,
     };
   },
 };
 
-/** Filter 5 — Placeholder: Volume vs Average Volume Ratio */
+// ---------------------------------------------------------------------------
+// Filter 5 — Verify Earnings Are Within 2 Weeks (final gate)
+//
+// A direct re-confirmation that earnings fall within the 14-day entry window
+// before any position is considered. Filter 2 makes the initial cut;
+// Filter 5 is the explicit sign-off at the end of the checklist.
+// ---------------------------------------------------------------------------
+
 const filter5: IFilterRule = {
-  name: "Filter 5 — Volume/AvgVolume Ratio",
+  name: "Filter 5 — Earnings Within 2 Weeks",
   evaluate(stock) {
-    const threshold = 0.8;
-    const ratio = stock.avgVolume > 0 ? stock.volume / stock.avgVolume : 0;
-    const passed = ratio >= threshold;
+    if (!stock.nextEarningsDate) {
+      return {
+        name: this.name,
+        passed: false,
+        calculatedValue: "No earnings date",
+        threshold: "Earnings within 14 days",
+        explanation: `No confirmed earnings date for ${stock.symbol} — cannot verify the 2-week window.`,
+      };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const earningsDate = new Date(stock.nextEarningsDate + "T00:00:00");
+    const daysUntil = Math.round(
+      (earningsDate.getTime() - today.getTime()) / 86_400_000
+    );
+    const passed = daysUntil >= 0 && daysUntil <= 14;
+
+    const dayLabel =
+      daysUntil === 0 ? "today"
+      : daysUntil === 1 ? "tomorrow"
+      : `in ${daysUntil} days`;
+
     return {
       name: this.name,
       passed,
-      calculatedValue: ratio.toFixed(2) + "x",
-      threshold: `>= ${threshold}x`,
+      calculatedValue:
+        daysUntil < 0
+          ? `${Math.abs(daysUntil)}d ago`
+          : `${daysUntil}d (${stock.nextEarningsDate})`,
+      threshold: "Earnings within 14 days",
       explanation: passed
-        ? `Volume ratio of ${ratio.toFixed(2)}x indicates normal or elevated trading activity.`
-        : `Volume ratio of ${ratio.toFixed(2)}x suggests unusually low activity versus average.`,
+        ? `✔ Confirmed: ${stock.symbol} reports earnings ${dayLabel} (${stock.nextEarningsDate}) — within the 2-week entry window.`
+        : daysUntil < 0
+        ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Waiting for next cycle.`
+        : `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — outside the 14-day entry window.`,
     };
   },
 };
