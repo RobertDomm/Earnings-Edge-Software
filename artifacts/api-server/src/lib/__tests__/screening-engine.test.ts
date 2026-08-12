@@ -1118,6 +1118,31 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
       `calculatedValue must be 'No calendar data' when both strike fields are null (got: "${result.calculatedValue}")`
     );
   });
+
+  it("fails with 'No calendar data' when all four calendar fields are null (shortCallStrike=null, shortPutStrike=null, callCalendarPeak=null, putCalendarPeak=null)", () => {
+    // Total absence of all calendar data — no strikes and no peak values.
+    // This is the remaining untested null combination: confirms the null-guard
+    // handles complete data absence rather than only partial absence.
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        shortCallStrike: null,
+        shortPutStrike: null,
+        callCalendarPeak: null,
+        putCalendarPeak: null,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "all four calendar fields null must cause rejection — total absence of calendar data"
+    );
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' when all four calendar fields are null (got: "${result.calculatedValue}")`
+    );
+  });
 });
 
 // ===========================================================================
