@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ResultsTable } from "@/components/results-table";
 import type { StockResult } from "@workspace/api-client-react";
@@ -11,6 +11,15 @@ vi.mock("@/components/stock-detail-panel", () => ({
 }));
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
+
+const FILTER_6_PASS = {
+  name: "Filter 6 — Double Calendar Structure",
+  passed: true,
+  calculatedValue: "+$1.24 call  /  +$0.98 put",
+  threshold: "Both calendar peaks > $0 at short expiry",
+  explanation:
+    "Both risk-graph peaks are above zero — 207.5 call: +$1.24; 172.5 put: +$0.98. The double calendar structure is viable.",
+};
 
 function makeStock(price: number, symbol = "AAPL"): StockResult {
   return {
@@ -126,5 +135,70 @@ describe("ResultsTable delta badge", () => {
     const badges = document.querySelectorAll(".delta-badge");
     expect(badges.length).toBe(1);
     expect(badges[0]?.textContent).toMatch(/\+0\.50/);
+  });
+});
+
+// ── Setup column (Filter 6 trade details) ─────────────────────────────────────
+
+describe("ResultsTable Setup column", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows strikes and peak P&Ls when a stock is fully qualified and Filter 6 passed", () => {
+    const stock: StockResult = {
+      ...makeStock(200),
+      qualified: true,
+      status: "qualified",
+      filterResults: [FILTER_6_PASS],
+    };
+
+    render(buildTree([stock], 0.001, queryClient));
+
+    // Strike display: "207.5c / 172.5p" (rendered as two separate nodes)
+    expect(screen.getByText(/207\.5c/)).toBeTruthy();
+    expect(screen.getByText(/172\.5p/)).toBeTruthy();
+
+    // P&L display: "+$1.24 / +$0.98"
+    expect(screen.getByText(/\+\$1\.24/)).toBeTruthy();
+    expect(screen.getByText(/\+\$0\.98/)).toBeTruthy();
+  });
+
+  it("shows a dash instead of setup data when the stock is not overall-qualified, even if Filter 6 passed", () => {
+    const stock: StockResult = {
+      ...makeStock(200),
+      qualified: false,
+      status: "not_qualified",
+      filterResults: [FILTER_6_PASS],
+    };
+
+    render(buildTree([stock], 0.001, queryClient));
+
+    // No strikes or P&Ls should appear
+    expect(screen.queryByText(/207\.5c/)).toBeNull();
+    expect(screen.queryByText(/172\.5p/)).toBeNull();
+    expect(screen.queryByText(/\+\$1\.24/)).toBeNull();
+  });
+
+  it("shows a dash when the stock is qualified but has no Filter 6 result", () => {
+    const stock: StockResult = {
+      ...makeStock(200),
+      qualified: true,
+      status: "qualified",
+      filterResults: [], // no Filter 6 entry
+    };
+
+    render(buildTree([stock], 0.001, queryClient));
+
+    expect(screen.queryByText(/\d+c\s*\/\s*\d+p/)).toBeNull();
   });
 });

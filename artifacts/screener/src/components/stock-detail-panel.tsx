@@ -1,11 +1,43 @@
-import { useGetStockDetail, getGetStockDetailQueryKey } from "@workspace/api-client-react";
+import { useGetStockDetail, getGetStockDetailQueryKey, StockResult } from "@workspace/api-client-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "./ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
-import { Loader2, TrendingUp, TrendingDown, Info, ShieldAlert } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, Info, ShieldAlert, Activity } from "lucide-react";
 import { formatCurrency, formatPercent, formatCompactNumber } from "@/lib/formatters";
 import { Badge } from "./ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { ScrollArea } from "@radix-ui/react-scroll-area";
+
+// ── Filter 6 helper ──────────────────────────────────────────────────────────
+
+interface Filter6Data {
+  callStrike: string;
+  putStrike: string;
+  callPeak: string;
+  putPeak: string;
+}
+
+function getFilter6Data(stock: StockResult): Filter6Data | null {
+  // Only show trade setup for stocks that passed every filter
+  if (!stock.qualified) return null;
+  const f6 = stock.filterResults.find((fr) => fr.name.startsWith("Filter 6"));
+  if (!f6 || !f6.passed) return null;
+
+  const peakMatch = f6.calculatedValue.match(
+    /([+\-]\$[\d.]+)\s+call\s*\/\s*([+\-]\$[\d.]+)\s+put/
+  );
+  const strikeMatch = f6.explanation.match(
+    /([\d.]+)\s+call:.*?([\d.]+)\s+put:/
+  );
+
+  if (!peakMatch || !strikeMatch) return null;
+
+  return {
+    callStrike: strikeMatch[1],
+    putStrike: strikeMatch[2],
+    callPeak: peakMatch[1],
+    putPeak: peakMatch[2],
+  };
+}
 
 interface StockDetailPanelProps {
   symbol: string | null;
@@ -91,6 +123,46 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                 <div className="flex-1 overflow-auto bg-black/20 p-6">
                   <TabsContent value="overview" className="mt-0 h-full">
                     <div className="space-y-6">
+                      {/* Trade setup callout — only shown for qualifying stocks with F6 data */}
+                      {(() => {
+                        const f6 = getFilter6Data(detail.stock);
+                        if (!f6) return null;
+                        return (
+                          <div className="border border-emerald-500/30 bg-emerald-500/5 p-4 relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/60" />
+                            <div className="pl-3">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Activity className="h-3.5 w-3.5 text-emerald-500" />
+                                <h3 className="text-[10px] font-mono text-emerald-500 uppercase tracking-wider">
+                                  Double Calendar Setup
+                                </h3>
+                              </div>
+                              <div className="grid grid-cols-2 gap-6">
+                                <div className="space-y-3">
+                                  <div>
+                                    <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Strikes</span>
+                                    <span className="font-mono text-lg font-bold text-foreground">
+                                      {f6.callStrike}c&nbsp;/&nbsp;{f6.putStrike}p
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="space-y-3">
+                                  <div>
+                                    <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Peak P&amp;L</span>
+                                    <span className="font-mono text-lg font-bold text-emerald-500">
+                                      {f6.callPeak}&nbsp;/&nbsp;{f6.putPeak}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <p className="text-[10px] font-mono text-muted-foreground mt-3">
+                                Short 11 DTE · Long 18 DTE · Both risk-graph peaks above zero
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       <div>
                         <h3 className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">Options Activity</h3>
                         <div className="grid grid-cols-2 gap-4">
