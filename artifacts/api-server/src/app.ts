@@ -113,6 +113,9 @@ app.use(
     name: "screener.sid",
     resave: false,
     saveUninitialized: false,
+    // Roll the session expiry forward on every authenticated request so active
+    // users are never silently ejected while they're still using the app.
+    rolling: true,
     cookie: {
       httpOnly: true,
       // Secure is required when SameSite=None; Replit proxies all traffic over

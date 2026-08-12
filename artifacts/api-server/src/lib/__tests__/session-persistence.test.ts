@@ -105,6 +105,9 @@ function buildApp(): express.Express {
       name: COOKIE_NAME,
       resave: false,
       saveUninitialized: false,
+      // Mirror the production setting: roll the cookie expiry forward on every
+      // authenticated response so active users are never silently ejected.
+      rolling: true,
       cookie: {
         httpOnly: true,
         // Tests run over plain HTTP (127.0.0.1), so secure must be false.
@@ -186,6 +189,20 @@ function extractCookieValue(setCookieHeader: string | null): string {
   if (!setCookieHeader) throw new Error("No Set-Cookie header in response");
   // The first segment (before the first ";") is the key=value pair.
   return setCookieHeader.split(";")[0].trim();
+}
+
+/**
+ * Parse the Expires attribute from a raw Set-Cookie header and return its
+ * value as a Unix timestamp (ms).  express-session emits an absolute Expires
+ * date string rather than Max-Age when the cookie object carries a `maxAge`.
+ * Returns null if the attribute is absent or unparseable.
+ */
+function extractCookieExpires(setCookieHeader: string | null): number | null {
+  if (!setCookieHeader) return null;
+  const match = setCookieHeader.match(/[;,]\s*Expires=([^;]+)/i);
+  if (!match) return null;
+  const ts = Date.parse(match[1].trim());
+  return isNaN(ts) ? null : ts;
 }
 
 // ─── Test state ───────────────────────────────────────────────────────────────
@@ -512,5 +529,148 @@ describe("Session persistence across server restarts", () => {
     );
 
     await stopServer(serverB.server);
+  });
+
+  // ── Rolling expiry: active sessions get their expiry extended ─────────────
+  //
+  // What this proves
+  // ─────────────────
+  // `rolling: true` in express-session must do two things on every authenticated
+  // response:
+  //   a) Re-emit a Set-Cookie header with a fresh Max-Age so the browser cookie
+  //      is also extended (not just the server-side row).
+  //   b) Call the store's touch() to push the PostgreSQL `expire` column forward.
+  //
+  // Both are required: without (a) the browser discards the cookie after the
+  // original 24 h window even though the server would still accept it.
+  //
+  // Steps
+  // ──────
+  // 1. Log in — record the wall-clock time and read the initial DB expire.
+  // 2. Wait >1 s so connect-pg-simple's touch() threshold is met.
+  // 3. Send another authenticated request.
+  // 4. Assert the activity response carries a Set-Cookie header for screener.sid
+  //    with a Max-Age equal to the configured maxAge (i.e. the cookie was
+  //    re-issued, not just left alone).
+  // 5. Assert the PostgreSQL expire column has also advanced (store touch).
+
+  it("rolling: true re-issues the Set-Cookie header and extends the DB expire on each active request", async () => {
+    // ── Step 1: Log in ────────────────────────────────────────────────────
+    const server = await startServer();
+
+    const loginRes = await fetch(`${server.url}/test-login`, {
+      method: "POST",
+    });
+    assert.equal(
+      loginRes.status,
+      200,
+      `Login must return 200 (got ${loginRes.status})`,
+    );
+
+    const loginBody = (await loginRes.json()) as {
+      ok: boolean;
+      sessionId: string;
+    };
+    const sessionId = loginBody.sessionId;
+    sessionIdsToCleanup.push(sessionId);
+
+    const loginSetCookie = loginRes.headers.get("set-cookie");
+    const cookieValue = extractCookieValue(loginSetCookie);
+
+    // Record the Expires timestamp from the login cookie for later comparison.
+    const loginCookieExpires = extractCookieExpires(loginSetCookie);
+    assert.ok(
+      loginCookieExpires !== null && loginCookieExpires > Date.now(),
+      `Login Set-Cookie must carry a future Expires attribute ` +
+        `(got: ${loginSetCookie})`,
+    );
+
+    // Read the initial DB expire timestamp for later comparison.
+    const before = await sharedPool.query<{ expire: Date }>(
+      `SELECT expire FROM "session" WHERE sid = $1`,
+      [sessionId],
+    );
+    assert.equal(
+      before.rows.length,
+      1,
+      "Session row must exist in PostgreSQL after login",
+    );
+    const expireBefore = before.rows[0].expire.getTime();
+
+    // ── Step 2: Wait so connect-pg-simple's touch() threshold is met ──────
+    // connect-pg-simple skips touch() when the stored expiry is already
+    // within one TTL window (i.e. within one second for sub-second maxAges).
+    // With maxAge=24h it only touches when the new expiry would be > 1 s
+    // later than the stored value, so a 1.1 s delay is sufficient.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1100));
+
+    // ── Step 3: Send an authenticated activity request ─────────────────────
+    const activityRes = await fetch(`${server.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    assert.equal(
+      activityRes.status,
+      200,
+      `Activity request must return 200 (got ${activityRes.status})`,
+    );
+
+    const activityBody = (await activityRes.json()) as {
+      authenticated: boolean;
+    };
+    assert.equal(
+      activityBody.authenticated,
+      true,
+      "Session must still be authenticated during the rolling check",
+    );
+
+    // ── Step 4: Assert the response re-issued the Set-Cookie header ────────
+    // `rolling: true` must cause every authenticated response to emit a
+    // refreshed Set-Cookie so the browser's cookie lifetime is also extended.
+    // express-session emits an absolute Expires date (not Max-Age) when the
+    // cookie object carries a maxAge value.
+    const activitySetCookie = activityRes.headers.get("set-cookie");
+    assert.ok(
+      activitySetCookie !== null &&
+        activitySetCookie.startsWith(`${COOKIE_NAME}=`),
+      `Activity response must emit a Set-Cookie for ${COOKIE_NAME} ` +
+        `(rolling: true is required). Got: ${activitySetCookie}`,
+    );
+
+    // The refreshed cookie must carry an Expires timestamp that is strictly
+    // later than the one on the original login cookie — proving rolling advanced
+    // the browser-side lifetime, not just re-sent the same expiry.
+    const activityCookieExpires = extractCookieExpires(activitySetCookie);
+    assert.ok(
+      activityCookieExpires !== null,
+      `Set-Cookie from activity response must include an Expires attribute ` +
+        `(got: ${activitySetCookie})`,
+    );
+    assert.ok(
+      activityCookieExpires! > loginCookieExpires!,
+      `Rolled cookie Expires must be strictly later than the login cookie Expires ` +
+        `(login: ${new Date(loginCookieExpires!).toISOString()}, ` +
+        `activity: ${new Date(activityCookieExpires!).toISOString()})`,
+    );
+
+    // ── Step 5: Assert the PostgreSQL expire column has advanced ──────────
+    const after = await sharedPool.query<{ expire: Date }>(
+      `SELECT expire FROM "session" WHERE sid = $1`,
+      [sessionId],
+    );
+    assert.equal(
+      after.rows.length,
+      1,
+      "Session row must still exist after the activity request",
+    );
+    const expireAfter = after.rows[0].expire.getTime();
+
+    assert.ok(
+      expireAfter > expireBefore,
+      `PostgreSQL expire must advance after an active request ` +
+        `(before: ${new Date(expireBefore).toISOString()}, ` +
+        `after: ${new Date(expireAfter).toISOString()})`,
+    );
+
+    await stopServer(server.server);
   });
 });
