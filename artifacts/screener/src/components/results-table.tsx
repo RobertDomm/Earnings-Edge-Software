@@ -147,7 +147,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                 {renderSortableHeader("Symbol", "symbol")}
                 {renderSortableHeader("Company", "company")}
                 {renderSortableHeader("Price", "price")}
-                {renderSortableHeader("Change", "dailyChangePercent")}
+                {renderSortableHeader("Daily Change", "dailyChangePercent")}
                 {Array.from({ length: numFilters }, (_, i) => renderFilterHeader(i))}
                 {renderSortableHeader("Score", "filterScore")}
                 {renderSortableHeader("Status", "status")}
