@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { MarketStatusWidget } from "@/components/market-status-widget";
 import { ScannerStatusWidget, type AutoRefreshIntervalOption } from "@/components/scanner-status-widget";
@@ -111,6 +111,23 @@ export default function Dashboard() {
     });
   };
 
+  // Derive per-filter pass counts from the last scan's filterResults.
+  // Must be declared before any conditional return to preserve hook order.
+  const filterPassCounts = useMemo(() => {
+    const lastScan = scannerState?.lastScan;
+    if (!lastScan) return null; // no scan run yet
+    const total = lastScan.stocks.length;
+    const counts = new Map<string, number>();
+    for (const stock of lastScan.stocks) {
+      for (const fr of stock.filterResults) {
+        if (fr.passed) {
+          counts.set(fr.name, (counts.get(fr.name) ?? 0) + 1);
+        }
+      }
+    }
+    return { counts, total };
+  }, [scannerState?.lastScan]);
+
   if (!auth?.authorized) return null;
 
   const stocks = scannerState?.lastScan?.stocks || [];
@@ -164,7 +181,7 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 flex-1 min-h-0">
           <div className="lg:col-span-1 flex flex-col gap-6">
-            <FiltersPanel />
+            <FiltersPanel filterPassCounts={filterPassCounts} />
           </div>
           <div className="lg:col-span-4 flex flex-col min-h-0">
             {isLoading ? (
