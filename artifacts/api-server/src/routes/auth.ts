@@ -173,6 +173,16 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
   }
 
   req.log.info({ userId }, "User logged out");
+  // Instruct the browser to delete the cookie immediately so it is not
+  // replayed on subsequent requests even if the client ignores the session
+  // invalidation.  The options must match those used when the cookie was
+  // set (path, httpOnly, sameSite) so the browser treats it as the same
+  // cookie; Max-Age=0 / Expires-in-the-past is what triggers deletion.
+  res.clearCookie("screener.sid", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+  });
   res.json({ success: true });
 });
 

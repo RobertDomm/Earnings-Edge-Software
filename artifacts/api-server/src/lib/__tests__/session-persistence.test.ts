@@ -447,6 +447,79 @@ describe("Session persistence across server restarts", () => {
     await stopServer(serverB.server);
   });
 
+  // ── Logout response clears the browser cookie ────────────────────────────
+  //
+  // What this proves
+  // ─────────────────
+  // session.destroy() removes the server-side row, but without an explicit
+  // res.clearCookie() the browser retains the signed cookie and may replay
+  // it.  The logout response must include a Set-Cookie header for
+  // "screener.sid" whose Max-Age or Expires instructs the browser to delete
+  // the cookie immediately (Max-Age=0, or Expires in the past).
+  //
+  // Steps
+  // ──────
+  // 1. Log in — obtain a valid signed cookie.
+  // 2. POST /auth/logout with that cookie.
+  // 3. Assert the response includes a Set-Cookie header for the session cookie.
+  // 4. Assert that header's Max-Age is 0 OR its Expires date is in the past
+  //    (i.e. the browser is instructed to delete the cookie).
+
+  it("POST /auth/logout response includes a Set-Cookie header that clears the session cookie", async () => {
+    // ── Step 1: Log in to obtain a valid session cookie ───────────────────
+    const server = await startServer();
+
+    const loginRes = await fetch(`${server.url}/test-login`, { method: "POST" });
+    assert.equal(
+      loginRes.status,
+      200,
+      `Login must return 200 (got ${loginRes.status})`,
+    );
+
+    const loginBody = (await loginRes.json()) as { ok: boolean; sessionId: string };
+    sessionIdsToCleanup.push(loginBody.sessionId);
+
+    const cookieValue = extractCookieValue(loginRes.headers.get("set-cookie"));
+
+    // ── Step 2: Log out using the real production route ───────────────────
+    const logoutRes = await fetch(`${server.url}/auth/logout`, {
+      method: "POST",
+      headers: { Cookie: cookieValue },
+    });
+    assert.equal(
+      logoutRes.status,
+      200,
+      `Logout must return 200 (got ${logoutRes.status})`,
+    );
+    const logoutBody = (await logoutRes.json()) as { success: boolean };
+    assert.equal(logoutBody.success, true, "Logout must respond with { success: true }");
+
+    // ── Step 3: Assert the response includes a clearing Set-Cookie header ──
+    const logoutSetCookie = logoutRes.headers.get("set-cookie");
+    assert.ok(
+      logoutSetCookie !== null,
+      "Logout response must include a Set-Cookie header to clear the cookie in the browser",
+    );
+    assert.ok(
+      logoutSetCookie!.includes(COOKIE_NAME),
+      `Logout Set-Cookie must reference the session cookie "${COOKIE_NAME}" (got: ${logoutSetCookie})`,
+    );
+
+    // ── Step 4: Assert Max-Age=0 or Expires in the past ───────────────────
+    // Either signal instructs the browser to delete the cookie.
+    const hasMaxAgeZero = /Max-Age=0/i.test(logoutSetCookie!);
+    const expiresTs = extractCookieExpires(logoutSetCookie);
+    const hasExpiredDate = expiresTs !== null && expiresTs <= Date.now();
+
+    assert.ok(
+      hasMaxAgeZero || hasExpiredDate,
+      `Logout Set-Cookie must instruct the browser to delete the cookie ` +
+        `(Max-Age=0 or an Expires date in the past). Got: ${logoutSetCookie}`,
+    );
+
+    await stopServer(server.server);
+  });
+
   // ── Expired session is rejected ───────────────────────────────────────────
   //
   // Steps:
