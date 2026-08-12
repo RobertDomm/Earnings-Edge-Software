@@ -44,6 +44,10 @@ export interface ScreeningResult {
 
 export interface IFilterRule {
   name: string;
+  /** One-sentence summary of what this filter checks */
+  description: string;
+  /** Representative threshold string for display (stock-price-independent) */
+  defaultThreshold: string;
   /** Evaluate this rule against a single stock quote */
   evaluate(stock: StockQuote): FilterResult;
 }
@@ -80,6 +84,8 @@ const SECTOR_LABELS: Record<string, string> = {
 
 const filter1: IFilterRule = {
   name: "Filter 1 — Sector Exclusion",
+  description: "Excludes oil, biotech, healthcare, and military defense stocks whose price action is driven by sector-specific catalysts rather than earnings.",
+  defaultThreshold: "Not oil, biotech, healthcare, or military defense",
   evaluate(stock) {
     const sector = stock.sector ?? "other";
     const excluded = EXCLUDED_SECTORS.has(sector);
@@ -111,6 +117,8 @@ const EARNINGS_WINDOW_MAX = 18;
 
 const filter2: IFilterRule = {
   name: "Filter 2 — Earnings in 2 Weeks",
+  description: "Selects stocks whose next earnings announcement falls 14–18 calendar days out — the entry window for this strategy.",
+  defaultThreshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
   evaluate(stock) {
     if (!stock.nextEarningsDate) {
       return {
@@ -174,6 +182,8 @@ function maxSpreadForPrice(stockPrice: number): number {
 
 const filter3: IFilterRule = {
   name: "Filter 3 — Options Liquidity",
+  description: "Requires weekly options, penny-increment quoting, and near-term spreads within the price-tier limit ($0.10–$0.50 depending on stock price).",
+  defaultThreshold: "Weekly • Penny • Spread within price-tier limit",
   evaluate(stock) {
     const lm = stock.liquidityMetrics;
 
@@ -243,6 +253,8 @@ const REQUIRED_IV_CYCLES = 4;
 
 const filter4: IFilterRule = {
   name: "Filter 4 — IV Rise into Earnings",
+  description: "Checks that realized volatility (used as a proxy for IV, computed from Polygon stock aggregates) rose into earnings in each of the last 4 quarterly cycles — evidence of a consistent pre-earnings volatility run-up.",
+  defaultThreshold: `${REQUIRED_IV_CYCLES}/${REQUIRED_IV_CYCLES} cycles show RV expansion`,
   evaluate(stock) {
     const history = stock.earningsIvHistory;
 
@@ -295,6 +307,8 @@ const filter4: IFilterRule = {
 
 const filter5: IFilterRule = {
   name: "Filter 5 — Earnings Verified 2 Weeks Out",
+  description: "Final re-confirmation that earnings still fall in the 14–18 day window — the explicit sign-off before a position is considered.",
+  defaultThreshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
   evaluate(stock) {
     if (!stock.nextEarningsDate) {
       return {
@@ -345,6 +359,20 @@ export const FILTER_RULES: IFilterRule[] = [
   filter4,
   filter5,
 ];
+
+/**
+ * Returns static metadata for each active filter rule — name, description,
+ * and a representative threshold string suitable for display in the UI.
+ * All currently active rules are fully implemented.
+ */
+export function getFilterDefinitions() {
+  return FILTER_RULES.map((rule) => ({
+    name: rule.name,
+    description: rule.description,
+    threshold: rule.defaultThreshold,
+    implemented: true,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Screening Engine

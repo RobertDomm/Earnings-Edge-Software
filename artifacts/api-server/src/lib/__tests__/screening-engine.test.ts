@@ -13,7 +13,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { FILTER_RULES } from "../screening-engine.js";
+import { FILTER_RULES, getFilterDefinitions } from "../screening-engine.js";
 import type { StockQuote } from "../market-data.js";
 
 // ---------------------------------------------------------------------------
@@ -179,5 +179,59 @@ describe("Filter 1 — Sector Exclusion: edge cases", () => {
     assert.ok(t.includes("biotech"),    `threshold must mention 'biotech' (got: "${result.threshold}")`);
     assert.ok(t.includes("healthcare"), `threshold must mention 'healthcare' (got: "${result.threshold}")`);
     assert.ok(t.includes("defense"),    `threshold must mention 'defense' (got: "${result.threshold}")`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getFilterDefinitions() — metadata returned to the Filters panel
+// ---------------------------------------------------------------------------
+
+describe("getFilterDefinitions()", () => {
+  const defs = getFilterDefinitions();
+
+  it("returns one definition per active FILTER_RULES entry", () => {
+    assert.equal(
+      defs.length,
+      FILTER_RULES.length,
+      `getFilterDefinitions() must return ${FILTER_RULES.length} entries, one per active rule`
+    );
+  });
+
+  it("every definition has a non-empty name, description, and threshold", () => {
+    for (const def of defs) {
+      assert.ok(def.name.trim().length > 0,        `name must be non-empty (got: "${def.name}")`);
+      assert.ok(def.description.trim().length > 0, `description must be non-empty for "${def.name}"`);
+      assert.ok(def.threshold.trim().length > 0,   `threshold must be non-empty for "${def.name}"`);
+    }
+  });
+
+  it("every definition has implemented=true (all rules are active)", () => {
+    for (const def of defs) {
+      assert.equal(
+        def.implemented,
+        true,
+        `implemented must be true for "${def.name}"`
+      );
+    }
+  });
+
+  it("definition names match the corresponding FILTER_RULES names in order", () => {
+    for (let i = 0; i < FILTER_RULES.length; i++) {
+      assert.equal(
+        defs[i].name,
+        FILTER_RULES[i].name,
+        `definition[${i}].name must match FILTER_RULES[${i}].name`
+      );
+    }
+  });
+
+  it("Filter 4 description references realized volatility (RV proxy), not raw implied volatility", () => {
+    const filter4Def = defs.find((d) => d.name.includes("Filter 4"));
+    assert.ok(filter4Def, "Filter 4 definition must exist");
+    const desc = filter4Def!.description.toLowerCase();
+    assert.ok(
+      desc.includes("realized") || desc.includes("rv") || desc.includes("proxy"),
+      `Filter 4 description must mention realized volatility or proxy usage (got: "${filter4Def!.description}")`
+    );
   });
 });

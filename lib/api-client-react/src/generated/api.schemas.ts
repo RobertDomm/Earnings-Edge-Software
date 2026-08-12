@@ -72,6 +72,17 @@ export interface MarketStatus {
   nextClose?: string | null;
 }
 
+export interface FilterDefinition {
+  name: string;
+  description: string;
+  threshold: string;
+  implemented: boolean;
+}
+
+export interface FilterList {
+  filters: FilterDefinition[];
+}
+
 export interface FilterResult {
   name: string;
   passed: boolean;

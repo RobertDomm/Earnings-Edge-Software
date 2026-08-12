@@ -152,6 +152,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /scanner/filters:
+    get:
+      operationId: getScannerFilters
+      tags: [scanner]
+      summary: Get active filter definitions
+      description: Returns the list of active filter rules with names, descriptions, and thresholds (requires auth)
+      responses:
+        "200":
+          description: Filter definitions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FilterList"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /scanner/results:
     get:
       operationId: getScannerResults
@@ -280,6 +300,28 @@ components:
         nextClose:
           type: ["string", "null"]
           format: date-time
+
+    FilterDefinition:
+      type: object
+      required: [name, description, threshold, implemented]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        threshold:
+          type: string
+        implemented:
+          type: boolean
+
+    FilterList:
+      type: object
+      required: [filters]
+      properties:
+        filters:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilterDefinition"
 
     FilterResult:
       type: object

@@ -12,6 +12,8 @@ export * from './circleUser';
 export * from './dataFreshness';
 export * from './dataFreshnessSource';
 export * from './errorResponse';
+export * from './filterDefinition';
+export * from './filterList';
 export * from './filterResult';
 export * from './handleAuthCallbackParams';
 export * from './healthStatus';

@@ -141,6 +141,20 @@ export const RunScannerResponse = zod.object({
 
 
 /**
+ * Returns the list of active filter rules with names, descriptions, and thresholds (requires auth)
+ * @summary Get active filter definitions
+ */
+export const GetScannerFiltersResponse = zod.object({
+  "filters": zod.array(zod.object({
+  "name": zod.string(),
+  "description": zod.string(),
+  "threshold": zod.string(),
+  "implemented": zod.boolean()
+}))
+})
+
+
+/**
  * Returns the most recent scan results plus scanner status info (requires auth)
  * @summary Get last scanner results and status
  */

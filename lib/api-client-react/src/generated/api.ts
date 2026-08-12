@@ -22,6 +22,7 @@ import type {
 import type {
   AuthStatus,
   ErrorResponse,
+  FilterList,
   HandleAuthCallbackParams,
   HealthStatus,
   InitiateLoginParams,
@@ -605,6 +606,84 @@ export const useRunScanner = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getRunScannerMutationOptions(options));
     }
+
+export const getGetScannerFiltersUrl = () => {
+
+
+
+
+  return `/api/scanner/filters`
+}
+
+/**
+ * Returns the list of active filter rules with names, descriptions, and thresholds (requires auth)
+ * @summary Get active filter definitions
+ */
+export const getScannerFilters = async ( options?: Parameters<typeof customFetch>[1]): Promise<FilterList> => {
+
+  return customFetch<FilterList>(getGetScannerFiltersUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetScannerFiltersQueryKey = () => {
+    return [
+    `/api/scanner/filters`
+    ] as const;
+    }
+
+
+export const getGetScannerFiltersQueryOptions = <TData = Awaited<ReturnType<typeof getScannerFilters>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getScannerFilters>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetScannerFiltersQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getScannerFilters>>> = ({ signal }) => getScannerFilters({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getScannerFilters>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetScannerFiltersQueryResult = NonNullable<Awaited<ReturnType<typeof getScannerFilters>>>
+export type GetScannerFiltersQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get active filter definitions
+ */
+
+export function useGetScannerFilters<TData = Awaited<ReturnType<typeof getScannerFilters>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getScannerFilters>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetScannerFiltersQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetScannerResultsUrl = () => {
 

@@ -17,6 +17,7 @@
 import { Router, type IRouter } from "express";
 import { requireAuth } from "../middlewares/require-auth.js";
 import { marketDataProvider, screeningEngine } from "../services.js";
+import { getFilterDefinitions } from "../lib/screening-engine.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -33,6 +34,11 @@ let lastScanResult: {
 } | null = null;
 
 let scannerStatus: "idle" | "running" | "complete" | "error" = "idle";
+
+// GET /scanner/filters — return static filter definitions
+router.get("/scanner/filters", requireAuth, (_req, res): void => {
+  res.json({ filters: getFilterDefinitions() });
+});
 
 // POST /scanner/run — start a scan
 router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
