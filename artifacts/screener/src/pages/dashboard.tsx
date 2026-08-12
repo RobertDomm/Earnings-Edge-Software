@@ -16,39 +16,56 @@ import { LogOut, TerminalSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 
-// Default polling interval — configurable per-session via the UI dropdown
-const DEFAULT_INTERVAL: AutoRefreshIntervalOption = 30;
+// ── Auto-refresh interval ────────────────────────────────────────────────────
 
-const STORAGE_KEY = "screener:auto-refresh-interval";
+const DEFAULT_INTERVAL: AutoRefreshIntervalOption = 30;
+const INTERVAL_STORAGE_KEY = "screener:auto-refresh-interval";
 const VALID_INTERVALS = new Set<number>([0, 15, 30, 60, 300]);
 
 function readStoredInterval(): AutoRefreshIntervalOption {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(INTERVAL_STORAGE_KEY);
     if (raw === null) return DEFAULT_INTERVAL;
     const parsed = Number(raw);
-    return VALID_INTERVALS.has(parsed)
-      ? (parsed as AutoRefreshIntervalOption)
-      : DEFAULT_INTERVAL;
+    return VALID_INTERVALS.has(parsed) ? (parsed as AutoRefreshIntervalOption) : DEFAULT_INTERVAL;
   } catch {
-    // localStorage unavailable (e.g. private-browsing restrictions)
     return DEFAULT_INTERVAL;
   }
 }
 
 function writeStoredInterval(value: AutoRefreshIntervalOption): void {
+  try { localStorage.setItem(INTERVAL_STORAGE_KEY, String(value)); } catch { /* ignore */ }
+}
+
+// ── Flash threshold ──────────────────────────────────────────────────────────
+
+export type FlashThresholdOption = 0.001 | 0.0025 | 0.005 | 0.01 | 0.02;
+
+const DEFAULT_THRESHOLD: FlashThresholdOption = 0.001;
+const THRESHOLD_STORAGE_KEY = "screener:flash-threshold";
+const VALID_THRESHOLDS = new Set<number>([0.001, 0.0025, 0.005, 0.01, 0.02]);
+
+function readStoredThreshold(): FlashThresholdOption {
   try {
-    localStorage.setItem(STORAGE_KEY, String(value));
+    const raw = localStorage.getItem(THRESHOLD_STORAGE_KEY);
+    if (raw === null) return DEFAULT_THRESHOLD;
+    const parsed = Number(raw);
+    return VALID_THRESHOLDS.has(parsed) ? (parsed as FlashThresholdOption) : DEFAULT_THRESHOLD;
   } catch {
-    // Silently ignore write failures
+    return DEFAULT_THRESHOLD;
   }
 }
+
+function writeStoredThreshold(value: FlashThresholdOption): void {
+  try { localStorage.setItem(THRESHOLD_STORAGE_KEY, String(value)); } catch { /* ignore */ }
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { auth } = useRequireAuth();
   const [_, setLocation] = useLocation();
-  // Lazy initializer reads from localStorage; falls back to DEFAULT_INTERVAL
-  // when no value is stored or the stored value is not a valid option.
+
   const [intervalSeconds, setIntervalSeconds] =
     useState<AutoRefreshIntervalOption>(readStoredInterval);
 
@@ -57,10 +74,17 @@ export default function Dashboard() {
     setIntervalSeconds(next);
   };
 
+  const [flashThreshold, setFlashThreshold] =
+    useState<FlashThresholdOption>(readStoredThreshold);
+
+  const handleFlashThresholdChange = (next: FlashThresholdOption) => {
+    writeStoredThreshold(next);
+    setFlashThreshold(next);
+  };
+
   const { data: marketStatus } = useGetMarketStatus({
     query: {
       queryKey: getGetMarketStatusQueryKey(),
-      // Market status drives polling behavior — poll every 60s to detect open/close transitions
       refetchInterval: 60_000,
     },
   });
@@ -75,8 +99,6 @@ export default function Dashboard() {
     query: {
       queryKey: getGetScannerResultsQueryKey(),
       enabled: !!auth?.authorized,
-      // Background poll for results — the auto-scanner invalidates this after each run,
-      // and the 5s fallback poll catches any race conditions
       refetchInterval: 5_000,
     },
   });
@@ -85,21 +107,16 @@ export default function Dashboard() {
 
   const handleLogout = () => {
     logoutMutation.mutate(undefined, {
-      onSuccess: () => {
-        setLocation("/access-restricted");
-      },
+      onSuccess: () => setLocation("/access-restricted"),
     });
   };
 
-  if (!auth?.authorized) {
-    return null; // Will redirect via useRequireAuth
-  }
+  if (!auth?.authorized) return null;
 
   const stocks = scannerState?.lastScan?.stocks || [];
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans relative overflow-hidden">
-      {/* Subtle grid background */}
       <div className="absolute inset-0 z-0 opacity-10 pointer-events-none">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
       </div>
@@ -139,6 +156,8 @@ export default function Dashboard() {
               autoScanner={autoScanner}
               intervalSeconds={intervalSeconds}
               onIntervalChange={handleIntervalChange}
+              flashThreshold={flashThreshold}
+              onFlashThresholdChange={handleFlashThresholdChange}
             />
           </div>
         </div>
@@ -156,7 +175,7 @@ export default function Dashboard() {
                 </span>
               </div>
             ) : (
-              <ResultsTable stocks={stocks} />
+              <ResultsTable stocks={stocks} flashThreshold={flashThreshold} />
             )}
           </div>
         </div>

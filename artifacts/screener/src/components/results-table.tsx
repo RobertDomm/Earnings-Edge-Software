@@ -11,12 +11,14 @@ import { useFlashMap } from "@/hooks/use-flash-map";
 
 interface ResultsTableProps {
   stocks: StockResult[];
+  /** Relative price-change fraction that triggers a flash highlight (default 0.001 = 0.1%) */
+  flashThreshold?: number;
 }
 
 type SortKey = keyof StockResult;
 type SortOrder = "asc" | "desc" | null;
 
-export function ResultsTable({ stocks }: ResultsTableProps) {
+export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTableProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "qualified" | "not_qualified">("all");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -27,7 +29,7 @@ export function ResultsTable({ stocks }: ResultsTableProps) {
   // that non-qualifying updates do not cancel active flashes on other symbols.
   // `animKey` is baked into the React `key` of each row so that a repeat flash
   // on the same symbol forces a DOM remount and restarts the CSS animation.
-  const flashMap = useFlashMap(stocks);
+  const flashMap = useFlashMap(stocks, flashThreshold);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
