@@ -7,6 +7,7 @@ import { formatCurrency, formatPercent, formatCompactNumber } from "@/lib/format
 import { Badge } from "./ui/badge";
 import { Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { StockDetailPanel } from "./stock-detail-panel";
+import { useFlashMap } from "@/hooks/use-flash-map";
 
 interface ResultsTableProps {
   stocks: StockResult[];
@@ -21,6 +22,12 @@ export function ResultsTable({ stocks }: ResultsTableProps) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+
+  // Per-symbol flash state. Each entry has an independent 1.5 s expiry timer so
+  // that non-qualifying updates do not cancel active flashes on other symbols.
+  // `animKey` is baked into the React `key` of each row so that a repeat flash
+  // on the same symbol forces a DOM remount and restarts the CSS animation.
+  const flashMap = useFlashMap(stocks);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -129,55 +136,69 @@ export function ResultsTable({ stocks }: ResultsTableProps) {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredStocks.map((stock) => (
-                  <TableRow 
-                    key={stock.symbol} 
-                    className="cursor-pointer hover:bg-muted/30 transition-colors group border-none"
-                    onClick={() => setSelectedSymbol(stock.symbol)}
-                  >
-                    <TableCell className="font-mono font-semibold text-primary px-3 py-2.5">
-                      {stock.symbol}
-                    </TableCell>
-                    <TableCell className="max-w-[150px] truncate text-muted-foreground px-3 py-2.5" title={stock.company}>
-                      {stock.company}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5">
-                      {formatCurrency(stock.price)}
-                    </TableCell>
-                    <TableCell className={`font-mono text-right px-3 py-2.5 ${stock.dailyChangePercent > 0 ? "text-emerald-500" : stock.dailyChangePercent < 0 ? "text-red-500" : ""}`}>
-                      {formatPercent(stock.dailyChangePercent)}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5">
-                      {formatCompactNumber(stock.volume)}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
-                      {formatCompactNumber(stock.avgVolume)}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
-                      {formatCompactNumber(stock.marketCap)}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5">
-                      {(stock.impliedVolatility * 100).toFixed(1)}%
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5">
-                      {formatCompactNumber(stock.optionsVolume)}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
-                      {formatCompactNumber(stock.openInterest)}
-                    </TableCell>
-                    <TableCell className="font-mono text-right px-3 py-2.5">
-                      {stock.filterScore.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="px-3 py-2.5 text-center">
-                      <Badge 
-                        variant={stock.status === "qualified" ? "success" : "danger"}
-                        className="font-mono text-[10px] uppercase tracking-wider rounded-none px-1.5 py-0"
-                      >
-                        {stock.status.replace("_", " ")}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))
+                filteredStocks.map((stock) => {
+                  const flash = flashMap.get(stock.symbol);
+                  // Including animKey in the React key remounts the row when the same
+                  // symbol flashes again, which restarts the CSS keyframe animation.
+                  const rowKey = flash
+                    ? `${stock.symbol}-${flash.animKey}`
+                    : stock.symbol;
+                  return (
+                    <TableRow
+                      key={rowKey}
+                      className={`cursor-pointer hover:bg-muted/30 transition-colors group border-none${
+                        flash?.direction === "up"
+                          ? " row-flash-up"
+                          : flash?.direction === "down"
+                          ? " row-flash-down"
+                          : ""
+                      }`}
+                      onClick={() => setSelectedSymbol(stock.symbol)}
+                    >
+                      <TableCell className="font-mono font-semibold text-primary px-3 py-2.5">
+                        {stock.symbol}
+                      </TableCell>
+                      <TableCell className="max-w-[150px] truncate text-muted-foreground px-3 py-2.5" title={stock.company}>
+                        {stock.company}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5">
+                        {formatCurrency(stock.price)}
+                      </TableCell>
+                      <TableCell className={`font-mono text-right px-3 py-2.5 ${stock.dailyChangePercent > 0 ? "text-emerald-500" : stock.dailyChangePercent < 0 ? "text-red-500" : ""}`}>
+                        {formatPercent(stock.dailyChangePercent)}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5">
+                        {formatCompactNumber(stock.volume)}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
+                        {formatCompactNumber(stock.avgVolume)}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
+                        {formatCompactNumber(stock.marketCap)}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5">
+                        {(stock.impliedVolatility * 100).toFixed(1)}%
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5">
+                        {formatCompactNumber(stock.optionsVolume)}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
+                        {formatCompactNumber(stock.openInterest)}
+                      </TableCell>
+                      <TableCell className="font-mono text-right px-3 py-2.5">
+                        {stock.filterScore.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="px-3 py-2.5 text-center">
+                        <Badge 
+                          variant={stock.status === "qualified" ? "success" : "danger"}
+                          className="font-mono text-[10px] uppercase tracking-wider rounded-none px-1.5 py-0"
+                        >
+                          {stock.status.replace("_", " ")}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
