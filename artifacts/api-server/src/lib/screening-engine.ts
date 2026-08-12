@@ -453,9 +453,11 @@ export class ScreeningEngine {
     this.rules = rules;
   }
 
-  /** Run all filter rules against a single stock */
-  evaluateStock(stock: StockQuote): ScreeningResult {
-    const filterResults = this.rules.map((rule) => rule.evaluate(stock));
+  /** Run all filter rules against a single stock.
+   * @param today  Optional override for "today" (defaults to `new Date()`).
+   *               Pass a fixed value in tests to make assertions hermetic. */
+  evaluateStock(stock: StockQuote, today?: Date): ScreeningResult {
+    const filterResults = this.rules.map((rule) => rule.evaluate(stock, today));
     const passed = filterResults.filter((r) => r.passed).length;
     const filterScore = this.rules.length > 0
       ? Math.round((passed / this.rules.length) * 100)
@@ -480,9 +482,11 @@ export class ScreeningEngine {
     };
   }
 
-  /** Run all filter rules against the full stock universe */
-  runScreening(stocks: StockQuote[]): ScreeningResult[] {
-    return stocks.map((stock) => this.evaluateStock(stock));
+  /** Run all filter rules against the full stock universe.
+   * @param today  Optional override for "today" (defaults to `new Date()`).
+   *               Pass a fixed value in tests to make assertions hermetic. */
+  runScreening(stocks: StockQuote[], today?: Date): ScreeningResult[] {
+    return stocks.map((stock) => this.evaluateStock(stock, today));
   }
 }
 

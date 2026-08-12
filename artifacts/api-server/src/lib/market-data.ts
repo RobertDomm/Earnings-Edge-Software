@@ -184,7 +184,7 @@ export interface IMarketDataProvider {
 // MOCK MARKET DATA — clearly labeled as development/test data
 // ---------------------------------------------------------------------------
 
-const MOCK_STOCKS: StockQuote[] = [
+export const MOCK_STOCKS: StockQuote[] = [
   {
     symbol: "AAPL",
     company: "Apple Inc.",
