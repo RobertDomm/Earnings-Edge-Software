@@ -35,6 +35,8 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 // Use the workspace DB package — it already depends on pg and exports the pool.
 import { pool as sharedPool } from "@workspace/db";
+// Real auth router — tests the production logout path, not a synthetic clone.
+import authRouter from "../../routes/auth.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -84,6 +86,18 @@ function buildApp(): express.Express {
   const app = express();
   app.use(express.json());
 
+  // The real auth router calls req.log (pino per-request logger).
+  // Attach a no-op stub so the router works without pino-http in tests.
+  app.use((req, _res, next) => {
+    (req as any).log = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    };
+    next();
+  });
+
   app.use(
     session({
       store: makeStore(),
@@ -124,6 +138,10 @@ function buildApp(): express.Express {
     });
   };
   app.get("/test-status", statusHandler);
+
+  // Mount the real auth router so the logout test exercises the production
+  // logout path (session.destroy awaited before success response).
+  app.use("/", authRouter);
 
   return app;
 }
@@ -314,6 +332,102 @@ describe("Session persistence across server restarts", () => {
     );
 
     await stopServer(server.server);
+  });
+
+  // ── Logout invalidates the session immediately ────────────────────────────
+  //
+  // Steps:
+  // 1. Log in on Server A — get a signed cookie and a session row in PostgreSQL.
+  // 2. Log out on Server A — session.destroy() must delete the row.
+  // 3. Stop Server A (discard all in-memory state).
+  // 4. Start Server B — a fresh process with no warm session cache.
+  // 5. Replay the original cookie on Server B.
+  // 6. Assert authenticated: false — the row is gone from PostgreSQL.
+
+  it("replayed cookie after logout returns authenticated false, even on a fresh server instance", async () => {
+    // ── Step 1: Log in ────────────────────────────────────────────────────
+    const serverA = await startServer();
+
+    const loginRes = await fetch(`${serverA.url}/test-login`, {
+      method: "POST",
+    });
+    assert.equal(
+      loginRes.status,
+      200,
+      `Login must return 200 (got ${loginRes.status})`,
+    );
+
+    const loginBody = (await loginRes.json()) as {
+      ok: boolean;
+      sessionId: string;
+    };
+    const sessionId = loginBody.sessionId;
+    sessionIdsToCleanup.push(sessionId);
+
+    const cookieValue = extractCookieValue(loginRes.headers.get("set-cookie"));
+
+    // Confirm the session is live before logout.
+    const preLogoutRes = await fetch(`${serverA.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    const preLogoutBody = (await preLogoutRes.json()) as {
+      authenticated: boolean;
+    };
+    assert.equal(
+      preLogoutBody.authenticated,
+      true,
+      "Session must be authenticated before logout",
+    );
+
+    // ── Step 2: Log out via the real production route ─────────────────────
+    // POST /auth/logout (the actual handler) awaits session.destroy before
+    // returning { success: true }, so when this fetch resolves the session
+    // row is guaranteed to be gone from PostgreSQL.
+    const logoutRes = await fetch(`${serverA.url}/auth/logout`, {
+      method: "POST",
+      headers: { Cookie: cookieValue },
+    });
+    assert.equal(
+      logoutRes.status,
+      200,
+      `Logout must return 200 (got ${logoutRes.status})`,
+    );
+    const logoutBody = (await logoutRes.json()) as { success: boolean };
+    assert.equal(
+      logoutBody.success,
+      true,
+      "Real logout route must respond with { success: true }",
+    );
+
+    // ── Step 3: Stop Server A (all in-memory state is gone) ───────────────
+    await stopServer(serverA.server);
+
+    // ── Step 4: Start Server B (fresh process, no session cache) ──────────
+    const serverB = await startServer();
+
+    // ── Step 5: Replay the original cookie on Server B ────────────────────
+    const replayRes = await fetch(`${serverB.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    assert.equal(
+      replayRes.status,
+      200,
+      `Status route must return 200 even for a logged-out cookie (got ${replayRes.status})`,
+    );
+
+    // ── Step 6: Assert the replayed cookie is rejected ────────────────────
+    const replayBody = (await replayRes.json()) as {
+      authenticated: boolean;
+      userId: string | null;
+    };
+    assert.equal(
+      replayBody.authenticated,
+      false,
+      "A cookie replayed after logout must not be authenticated " +
+        `(userId: ${replayBody.userId}, authenticated: ${replayBody.authenticated})`,
+    );
+
+    await stopServer(serverB.server);
   });
 
   // ── Expired session is rejected ───────────────────────────────────────────

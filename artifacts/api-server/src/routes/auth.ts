@@ -159,13 +159,20 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
   const session = req.session as any;
   const userId = session?.auth?.userId;
 
-  session.destroy((err: unknown) => {
-    if (err) {
-      logger.error({ err }, "Session destroy failed");
-    }
-    req.log.info({ userId }, "User logged out");
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      req.session.destroy((err: unknown) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  } catch (err) {
+    logger.error({ err }, "Session destroy failed");
+    res.status(500).json({ success: false, error: "Session could not be destroyed" });
+    return;
+  }
 
+  req.log.info({ userId }, "User logged out");
   res.json({ success: true });
 });
 
