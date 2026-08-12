@@ -734,6 +734,59 @@ describe("Filter 6 — Double Calendar Structure: positive cases", () => {
       `threshold must reference peaks and zero line (got: "${result.threshold}")`
     );
   });
+
+  it("passing result: calculatedValue and explanation both reference strike prices and peak values", () => {
+    // Use explicit strikes and peaks so assertions are unambiguous
+    const stock = baseStock({
+      symbol: "ACME",
+      liquidityMetrics: calendarMetrics({
+        shortCallStrike: 110,
+        shortPutStrike: 90,
+        callCalendarPeak: 1.50,
+        putCalendarPeak: 1.20,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+
+    assert.equal(result.passed, true, "both peaks > 0 must pass");
+
+    // calculatedValue must include formatted peak values for both legs
+    assert.ok(
+      result.calculatedValue.includes("+$1.50"),
+      `calculatedValue must include '+$1.50' call peak (got: "${result.calculatedValue}")`
+    );
+    assert.ok(
+      result.calculatedValue.includes("+$1.20"),
+      `calculatedValue must include '+$1.20' put peak (got: "${result.calculatedValue}")`
+    );
+
+    // explanation must reference the call strike
+    assert.ok(
+      result.explanation.includes("110"),
+      `explanation must mention call strike 110 (got: "${result.explanation}")`
+    );
+    // explanation must reference the put strike
+    assert.ok(
+      result.explanation.includes("90"),
+      `explanation must mention put strike 90 (got: "${result.explanation}")`
+    );
+    // explanation must reference the call peak value
+    assert.ok(
+      result.explanation.includes("1.50"),
+      `explanation must mention call peak 1.50 (got: "${result.explanation}")`
+    );
+    // explanation must reference the put peak value
+    assert.ok(
+      result.explanation.includes("1.20"),
+      `explanation must mention put peak 1.20 (got: "${result.explanation}")`
+    );
+    // explanation must confirm viability
+    assert.ok(
+      result.explanation.toLowerCase().includes("viable") ||
+        result.explanation.toLowerCase().includes("above zero"),
+      `explanation must confirm the structure is viable (got: "${result.explanation}")`
+    );
+  });
 });
 
 describe("Filter 6 — Double Calendar Structure: negative cases", () => {
