@@ -73,7 +73,7 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
             return (
               <div key={f.name} className="flex flex-col gap-0.5 p-3 py-2.5">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-mono text-muted-foreground truncate">
+                  <span className="text-xs font-mono text-muted-foreground">
                     {f.name}
                   </span>
                   {f.implemented ? (
