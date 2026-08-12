@@ -1016,6 +1016,38 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
       `explanation must name the put side as the failing leg (got: "${result.explanation}")`
     );
   });
+
+  it("fails when callCalendarPeak=-$1.50 and putCalendarPeak=+$5.00 — deeply negative call rejects despite large put profit", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: -1.50, putCalendarPeak: 5.00 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "callCalendarPeak=-$1.50 must cause rejection even when putCalendarPeak=+$5.00 is large and profitable"
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("call"),
+      `explanation must name the call side as the failing leg (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when callCalendarPeak=+$5.00 and putCalendarPeak=-$1.50 — deeply negative put rejects despite large call profit", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 5.00, putCalendarPeak: -1.50 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "putCalendarPeak=-$1.50 must cause rejection even when callCalendarPeak=+$5.00 is large and profitable"
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("put"),
+      `explanation must name the put side as the failing leg (got: "${result.explanation}")`
+    );
+  });
 });
 
 // ===========================================================================
