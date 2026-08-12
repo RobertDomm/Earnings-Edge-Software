@@ -5,6 +5,10 @@ export interface FlashEntry {
   direction: FlashDirection;
   /** Increments each time this symbol re-flashes; used as part of React key to remount row */
   animKey: number;
+  /** Absolute price change (new − old) */
+  delta: number;
+  /** Relative price change as a fraction, e.g. 0.003 for +0.3% */
+  deltaPercent: number;
 }
 
 /**
@@ -31,16 +35,18 @@ export function useFlashMap(
     if (stocks.length === 0) return;
 
     const prevPrices = prevPricesRef.current;
-    const qualifying: Array<{ symbol: string; direction: FlashDirection }> = [];
+    const qualifying: Array<{ symbol: string; direction: FlashDirection; delta: number; deltaPercent: number }> = [];
 
     for (const stock of stocks) {
       const prev = prevPrices.get(stock.symbol);
       if (prev !== undefined && prev !== 0) {
-        const delta = (stock.price - prev) / prev;
-        if (Math.abs(delta) >= threshold) {
+        const deltaPercent = (stock.price - prev) / prev;
+        if (Math.abs(deltaPercent) >= threshold) {
           qualifying.push({
             symbol: stock.symbol,
-            direction: delta > 0 ? "up" : "down",
+            direction: deltaPercent > 0 ? "up" : "down",
+            delta: stock.price - prev,
+            deltaPercent,
           });
         }
       }
@@ -54,11 +60,13 @@ export function useFlashMap(
     // Merge qualifying symbols into the existing flash map
     setFlashMap((prev) => {
       const next = new Map(prev);
-      for (const { symbol, direction } of qualifying) {
+      for (const { symbol, direction, delta, deltaPercent } of qualifying) {
         const existing = next.get(symbol);
         next.set(symbol, {
           direction,
           animKey: (existing?.animKey ?? 0) + 1,
+          delta,
+          deltaPercent,
         });
       }
       return next;

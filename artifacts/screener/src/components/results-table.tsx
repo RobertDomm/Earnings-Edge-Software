@@ -164,7 +164,24 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                         {stock.company}
                       </TableCell>
                       <TableCell className="font-mono text-right px-3 py-2.5">
-                        {formatCurrency(stock.price)}
+                        <span className="inline-flex items-center gap-1.5 justify-end">
+                          {formatCurrency(stock.price)}
+                          {flash && (
+                            <span
+                              key={flash.animKey}
+                              className={`delta-badge inline-block text-[10px] font-mono font-semibold px-1 py-0 leading-tight rounded-sm whitespace-nowrap ${
+                                flash.direction === "up"
+                                  ? "bg-emerald-500/20 text-emerald-400"
+                                  : "bg-red-500/20 text-red-400"
+                              }`}
+                            >
+                              {flash.delta >= 0 ? "+" : ""}
+                              {flash.delta.toFixed(2)}&nbsp;/&nbsp;
+                              {flash.deltaPercent >= 0 ? "+" : ""}
+                              {(flash.deltaPercent * 100).toFixed(2)}%
+                            </span>
+                          )}
+                        </span>
                       </TableCell>
                       <TableCell className={`font-mono text-right px-3 py-2.5 ${stock.dailyChangePercent > 0 ? "text-emerald-500" : stock.dailyChangePercent < 0 ? "text-red-500" : ""}`}>
                         {formatPercent(stock.dailyChangePercent)}

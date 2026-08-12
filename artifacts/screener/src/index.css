@@ -22,6 +22,16 @@
   animation: flash-down 1.5s ease-out forwards;
 }
 
+@keyframes badge-fade {
+  0%   { opacity: 1; }
+  60%  { opacity: 0.8; }
+  100% { opacity: 0; }
+}
+
+.delta-badge {
+  animation: badge-fade 1.5s ease-out forwards;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
