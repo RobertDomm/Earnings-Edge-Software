@@ -320,13 +320,21 @@ describe("Filter 2 — Earnings in 2 Weeks: boundary cases", () => {
     assert.equal(result.passed, false, "19 days out must be rejected — not yet in the entry window");
   });
 
-  it("fails when nextEarningsDate is null", () => {
+  it("is bypassed (passed=false, bypassed=true) when nextEarningsDate is null — data provider has no earnings calendar", () => {
+    // When the data provider cannot supply an earnings date (e.g. ThetaData), the filter
+    // is bypassed — neither passed nor failed — so the stock surfaces as qualified_with_caveats.
     const stock = baseStock({ nextEarningsDate: null });
     const result = filter2.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "null earnings date must not pass");
+    assert.equal(result.passed,   false, "null earnings date must not count as passed");
+    assert.equal(result.bypassed, true,  "null earnings date must set bypassed=true");
     assert.ok(
       result.calculatedValue.toLowerCase().includes("no earnings"),
       `calculatedValue must indicate no date (got: "${result.calculatedValue}")`
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("bypass") ||
+        result.explanation.toLowerCase().includes("unavailable"),
+      `explanation must mention bypass or unavailability (got: "${result.explanation}")`
     );
   });
 
@@ -537,13 +545,17 @@ describe("Filter 4 — IV Rise into Earnings: core pass/fail logic", () => {
     );
   });
 
-  it("fails when earningsIvHistory is null", () => {
+  it("is bypassed (passed=false, bypassed=true) when earningsIvHistory is null — data provider has no historical IV", () => {
+    // When the data provider cannot supply historical IV data (e.g. ThetaData), the filter
+    // is bypassed — neither passed nor failed — so the stock surfaces as qualified_with_caveats.
     const stock = baseStock({ earningsIvHistory: null });
     const result = filter4.evaluate(stock);
-    assert.equal(result.passed, false, "null earningsIvHistory must fail");
+    assert.equal(result.passed,   false, "null earningsIvHistory must not count as passed");
+    assert.equal(result.bypassed, true,  "null earningsIvHistory must set bypassed=true");
     assert.ok(
-      result.calculatedValue.includes("0/4"),
-      `calculatedValue must show 0 cycles (got: "${result.calculatedValue}")`
+      result.explanation.toLowerCase().includes("bypass") ||
+        result.explanation.toLowerCase().includes("unavailable"),
+      `explanation must mention bypass or unavailability (got: "${result.explanation}")`
     );
   });
 });
@@ -601,15 +613,23 @@ describe("Filter 5 — Earnings Verified 2 Weeks Out: boundary cases", () => {
     assert.equal(result.passed, false, "19 days out — not yet in window → must fail");
   });
 
-  it("fails when nextEarningsDate is null", () => {
+  it("is bypassed (passed=false, bypassed=true) when nextEarningsDate is null — data provider has no earnings calendar", () => {
+    // When the data provider cannot supply an earnings date (e.g. ThetaData), the filter
+    // is bypassed — matching Filter 2 behaviour.
     const stock = baseStock({ nextEarningsDate: null });
     const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "null earnings date must not be verified");
+    assert.equal(result.passed,   false, "null earnings date must not count as passed");
+    assert.equal(result.bypassed, true,  "null earnings date must set bypassed=true");
     assert.ok(
       result.calculatedValue.toLowerCase().includes("no earnings") ||
         result.calculatedValue.toLowerCase().includes("no date") ||
         result.calculatedValue.toLowerCase().includes("no confirmed"),
       `calculatedValue must indicate missing date (got: "${result.calculatedValue}")`
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("bypass") ||
+        result.explanation.toLowerCase().includes("unavailable"),
+      `explanation must mention bypass or unavailability (got: "${result.explanation}")`
     );
   });
 

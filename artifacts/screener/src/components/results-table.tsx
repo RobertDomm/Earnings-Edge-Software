@@ -5,7 +5,7 @@ import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { formatCurrency, formatPercent } from "@/lib/formatters";
 import { Badge } from "./ui/badge";
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, XCircle } from "lucide-react";
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import { StockDetailPanel } from "./stock-detail-panel";
 import { useFlashMap } from "@/hooks/use-flash-map";
 
@@ -228,12 +228,13 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                         {formatPercent(stock.dailyChangePercent)}
                       </TableCell>
 
-                      {/* Filter pass/fail columns */}
+                      {/* Filter pass/fail/bypass columns */}
                       {Array.from({ length: numFilters }, (_, i) => {
                         const fr = stock.filterResults?.[i];
-                        const passed = fr?.passed ?? false;
+                        const passed   = fr?.passed   ?? false;
+                        const bypassed = fr?.bypassed ?? false;
                         const tooltip = fr
-                          ? `${fr.name}\n\nResult: ${fr.calculatedValue}\nThreshold: ${fr.threshold}\n\n${fr.explanation}`
+                          ? `${fr.name}\n\nResult: ${fr.calculatedValue}\nThreshold: ${fr.threshold}\n\n${fr.explanation}${bypassed ? "\n\n⚠ Bypassed — data unavailable from provider. Verify manually." : ""}`
                           : `Filter ${i + 1}`;
                         return (
                           <TableCell
@@ -243,6 +244,8 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                           >
                             {passed ? (
                               <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" />
+                            ) : bypassed ? (
+                              <MinusCircle className="h-4 w-4 text-amber-400/80 mx-auto" />
                             ) : (
                               <XCircle className="h-4 w-4 text-red-500/70 mx-auto" />
                             )}
@@ -250,34 +253,44 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                         );
                       })}
 
-                      {/* Score */}
+                      {/* Score: count passed + bypassed, show bypass count separately */}
                       <TableCell className="font-mono text-right px-3 py-2.5 text-muted-foreground">
                         {stock.filterResults
-                          ? `${stock.filterResults.filter((fr) => fr.passed).length}/${stock.filterResults.length}`
+                          ? (() => {
+                              const passedCount   = stock.filterResults.filter(fr => fr.passed).length;
+                              const bypassedCount = stock.filterResults.filter(fr => fr.bypassed).length;
+                              const total         = stock.filterResults.length;
+                              if (bypassedCount > 0) {
+                                return `${passedCount}/${total} +${bypassedCount}⚠`;
+                              }
+                              return `${passedCount}/${total}`;
+                            })()
                           : "—"}
                       </TableCell>
 
                       {/* Status badge */}
                       <TableCell className="px-3 py-2.5 text-center">
                         {(() => {
-                          const isPartial =
-                            stock.status !== "qualified" &&
-                            (stock.filterResults?.[0]?.passed ?? false);
                           const label =
                             stock.status === "qualified"
                               ? "Pass"
-                              : isPartial
+                              : stock.status === "qualified_with_caveats"
+                              ? "Review"
+                              : (stock.filterResults?.[0]?.passed ?? false)
                               ? "Partial"
                               : "Fail";
                           const variant =
                             stock.status === "qualified"
                               ? "success"
-                              : isPartial
+                              : stock.status === "qualified_with_caveats"
+                              ? "warning"
+                              : (stock.filterResults?.[0]?.passed ?? false)
                               ? "warning"
                               : "danger";
                           return (
                             <Badge
                               variant={variant as "success" | "warning" | "danger"}
+                              title={stock.status === "qualified_with_caveats" ? "All filters passed or bypassed — verify bypassed criteria manually before entry" : undefined}
                               className="font-mono text-[10px] uppercase tracking-wider rounded-none px-1.5 py-0"
                             >
                               {label}

@@ -325,12 +325,23 @@ components:
 
     FilterResult:
       type: object
-      required: [name, passed, calculatedValue, threshold, explanation]
+      required: [name, passed, bypassed, calculatedValue, threshold, explanation]
       properties:
         name:
           type: string
         passed:
           type: boolean
+          description: >
+            True when the filter genuinely evaluated the stock and the stock met
+            the criterion. False when the stock failed OR when the filter was
+            bypassed because required data is unavailable (see `bypassed`).
+        bypassed:
+          type: boolean
+          description: >
+            True when the filter could not be evaluated because required data is
+            missing from the current data provider (e.g. ThetaData does not
+            supply earnings dates). A bypassed filter is neither a pass nor a
+            failure. Always false when `passed` is true.
         calculatedValue:
           type: string
         threshold:
@@ -340,7 +351,7 @@ components:
 
     StockResult:
       type: object
-      required: [symbol, company, price, dailyChangePercent, volume, avgVolume, marketCap, impliedVolatility, optionsVolume, openInterest, filterScore, status, filterResults, qualified]
+      required: [symbol, company, price, dailyChangePercent, volume, avgVolume, marketCap, impliedVolatility, optionsVolume, openInterest, filterScore, status, filterResults, qualified, qualifiedWithCaveats]
       properties:
         symbol:
           type: string
@@ -364,11 +375,27 @@ components:
           type: number
         filterScore:
           type: number
+          description: >
+            0–100 percentage of filters that either genuinely passed or were
+            bypassed. Only genuine failures reduce this score.
         status:
           type: string
-          enum: [qualified, not_qualified]
+          enum: [qualified, qualified_with_caveats, not_qualified]
+          description: >
+            "qualified" — all 6 filters passed with real data.
+            "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry.
+            "not_qualified" — at least one filter genuinely failed.
         qualified:
           type: boolean
+          description: >
+            True only when every filter genuinely passed — no bypasses, no
+            failures. The strongest signal; review the stock normally.
+        qualifiedWithCaveats:
+          type: boolean
+          description: >
+            True when every filter either passed or was bypassed (none failed),
+            but at least one filter was bypassed due to missing data. Requires
+            manual verification of bypassed criteria before entry.
         filterResults:
           type: array
           items:
@@ -389,7 +416,7 @@ components:
 
     ScanResult:
       type: object
-      required: [stocks, totalScanned, totalQualified, scanTime, dataAsOf, dataFreshness]
+      required: [stocks, totalScanned, totalQualified, totalQualifiedWithCaveats, scanTime, dataAsOf, dataFreshness]
       properties:
         stocks:
           type: array
@@ -399,6 +426,10 @@ components:
           type: number
         totalQualified:
           type: number
+          description: Stocks where every filter genuinely passed — no bypasses, no failures.
+        totalQualifiedWithCaveats:
+          type: number
+          description: Stocks where no filter failed but at least one was bypassed due to missing provider data.
         scanTime:
           type: string
           format: date-time

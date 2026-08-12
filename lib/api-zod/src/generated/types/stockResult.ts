@@ -19,8 +19,13 @@ export interface StockResult {
   impliedVolatility: number;
   optionsVolume: number;
   openInterest: number;
+  /** 0–100 percentage of filters that either genuinely passed or were bypassed. Only genuine failures reduce this score. */
   filterScore: number;
+  /** "qualified" — all 6 filters passed with real data. "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry. "not_qualified" — at least one filter genuinely failed. */
   status: StockResultStatus;
+  /** True only when every filter genuinely passed — no bypasses, no failures. The strongest signal; review the stock normally. */
   qualified: boolean;
+  /** True when every filter either passed or was bypassed (none failed), but at least one filter was bypassed due to missing data. Requires manual verification of bypassed criteria before entry. */
+  qualifiedWithCaveats: boolean;
   filterResults: FilterResult[];
 }

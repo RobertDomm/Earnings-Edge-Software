@@ -6,10 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * "qualified" — all 6 filters passed with real data. "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry. "not_qualified" — at least one filter genuinely failed.
+ */
 export type StockResultStatus = typeof StockResultStatus[keyof typeof StockResultStatus];
 
 
 export const StockResultStatus = {
   qualified: 'qualified',
+  qualified_with_caveats: 'qualified_with_caveats',
   not_qualified: 'not_qualified',
 } as const;

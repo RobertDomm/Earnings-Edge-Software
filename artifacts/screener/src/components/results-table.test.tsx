@@ -15,6 +15,7 @@ vi.mock("@/components/stock-detail-panel", () => ({
 const FILTER_6_PASS = {
   name: "Filter 6 — Double Calendar Structure",
   passed: true,
+  bypassed: false,
   calculatedValue: "+$1.24 call  /  +$0.98 put",
   threshold: "Both calendar peaks > $0 at short expiry",
   explanation:
@@ -36,6 +37,7 @@ function makeStock(price: number, symbol = "AAPL"): StockResult {
     filterScore: 0.85,
     status: "qualified",
     qualified: true,
+    qualifiedWithCaveats: false,
     filterResults: [],
   };
 }

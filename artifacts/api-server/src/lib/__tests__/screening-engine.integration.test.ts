@@ -18,7 +18,7 @@
  *   MSFT  → not qualified  (F2/F5 fail — earnings 29 d out)
  *   TSLA  → not qualified  (F4 fails — only 3/4 IV cycles rose)
  *   AMZN  → not qualified  (F2/F5 fail — earnings only 2 d out)
- *   SPY   → not qualified  (F2/F5 fail — ETF, no earnings date)
+ *   SPY   → not qualified  (F6 fails — ETF, no 30–60¢ OTM calendar structure)
  *   GOOGL → not qualified  (F6 fails — call-side calendar peak below zero)
  *   COIN  → not qualified  (F2/F3/F5 fail — earnings 20 d out, poor liquidity)
  *   XOM   → not qualified  (F1 fails — oil sector excluded)
@@ -140,23 +140,26 @@ describe("Full pipeline — filterScore consistency", () => {
     }
   });
 
-  it("non-qualified stocks have filterScore < 100", () => {
-    for (const r of results.filter((r) => !r.qualified)) {
+  it("stocks with at least one genuine failure have filterScore < 100", () => {
+    // A stock with qualifiedWithCaveats=true has no failures (only bypasses) so filterScore=100.
+    // Only stocks that have at least one genuine failure should have filterScore < 100.
+    for (const r of results.filter((r) => !r.qualified && !r.qualifiedWithCaveats)) {
       assert.ok(
         r.filterScore < 100,
-        `${r.symbol} is not qualified so filterScore must be < 100 (got ${r.filterScore})`
+        `${r.symbol} has a genuine failure so filterScore must be < 100 (got ${r.filterScore})`
       );
     }
   });
 
-  it("filterScore equals the percentage of filters passed (rounded)", () => {
+  it("filterScore equals the percentage of filters that passed or were bypassed (rounded)", () => {
     for (const r of results) {
-      const passedCount = r.filterResults.filter((f) => f.passed).length;
-      const expected = Math.round((passedCount / FILTER_RULES.length) * 100);
+      // filterScore counts genuine passes AND bypasses — only genuine failures reduce the score.
+      const creditCount = r.filterResults.filter((f) => f.passed || f.bypassed).length;
+      const expected = Math.round((creditCount / FILTER_RULES.length) * 100);
       assert.equal(
         r.filterScore,
         expected,
-        `${r.symbol}: filterScore must be ${expected} (${passedCount}/${FILTER_RULES.length} passed), got ${r.filterScore}`
+        `${r.symbol}: filterScore must be ${expected} (${creditCount}/${FILTER_RULES.length} passed or bypassed), got ${r.filterScore}`
       );
     }
   });
@@ -288,9 +291,18 @@ describe("Full pipeline — disqualification reasons", () => {
       "AMZN must fail Filter 2 (earnings 2 d out)");
   });
 
-  it("SPY fails Filter 2 (ETF — no earnings date)", () => {
-    assert.equal(resultFor("SPY").filterResults[1].passed, false,
-      "SPY must fail Filter 2 (no earnings date)");
+  it("SPY Filter 2 is bypassed (not passed, not failed) — ETF has no earnings date from provider", () => {
+    // Null earnings date → bypassed=true, passed=false.  SPY surfaces as not_qualified
+    // (Filter 6 fails), but the bypass architecture lets ThetaData stocks with real
+    // F1/F3/F6 data surface as qualified_with_caveats rather than silently sinking to 0.
+    const f2 = resultFor("SPY").filterResults[1];
+    assert.equal(f2.bypassed, true,  "SPY Filter 2 must be bypassed (bypassed=true)");
+    assert.equal(f2.passed,   false, "SPY Filter 2 must not count as passed (passed=false)");
+  });
+
+  it("SPY fails Filter 6 (ETF — no 30–60¢ OTM calendar structure)", () => {
+    assert.equal(resultFor("SPY").filterResults[5].passed, false,
+      "SPY must fail Filter 6 (no calendar data)");
   });
 
   it("SPY fails Filter 1 only on sector? No — ETF is allowed by Filter 1", () => {

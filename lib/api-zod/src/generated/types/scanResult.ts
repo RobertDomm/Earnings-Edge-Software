@@ -11,7 +11,10 @@ import type { StockResult } from './stockResult';
 export interface ScanResult {
   stocks: StockResult[];
   totalScanned: number;
+  /** Stocks where every filter genuinely passed — no bypasses, no failures. */
   totalQualified: number;
+  /** Stocks where no filter failed but at least one was bypassed due to missing provider data. */
+  totalQualifiedWithCaveats: number;
   scanTime: Date;
   dataAsOf: Date;
   dataFreshness: DataFreshness;

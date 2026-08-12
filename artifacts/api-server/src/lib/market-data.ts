@@ -2104,8 +2104,17 @@ function tdGetStr(row: Record<string, TdValue>, ...keys: string[]): string {
   return "";
 }
 
-// ---- ThetaDataProvider class ----
-
+/**
+ * Normalise the options right/side field to a single uppercase letter.
+ * ThetaData returns the full word "CALL" or "PUT"; normalise to "C"/"P"
+ * so all downstream comparisons are uniform.
+ */
+function tdNormalizeRight(raw: string): string {
+  const u = raw.toUpperCase();
+  if (u === "CALL") return "C";
+  if (u === "PUT")  return "P";
+  return u; // already "C", "P", or something unexpected
+}
 export class ThetaDataProvider implements IMarketDataProvider {
   readonly providerName = "ThetaDataProvider (ThetaData gRPC + Yahoo Finance)";
 
@@ -2354,7 +2363,7 @@ export class ThetaDataProvider implements IMarketDataProvider {
       const exp    = tdGetStr(row, "Expiration", "expiration");
       if (exp !== nearExp) continue;
       const strike = tdGetNum(row, "Strike", "strike");
-      const right  = tdGetStr(row, "Right",  "right", "CallPut", "call_put").toUpperCase();
+      const right  = tdNormalizeRight(tdGetStr(row, "Right", "right", "CallPut", "call_put"));
       if (!strike || (right !== "C" && right !== "P")) continue;
 
       const key  = `${strike}:${right}`;
@@ -2376,10 +2385,12 @@ export class ThetaDataProvider implements IMarketDataProvider {
     for (const row of greekRows) {
       const exp    = tdGetStr(row, "Expiration", "expiration");
       const strike = tdGetNum(row, "Strike", "strike");
-      const right  = tdGetStr(row, "Right",  "right", "CallPut", "call_put").toUpperCase();
+      const right  = tdNormalizeRight(tdGetStr(row, "Right", "right", "CallPut", "call_put"));
       if (!strike || (right !== "C" && right !== "P")) continue;
       const key = `${strike}:${right}`;
-      const iv  = tdGetNum(row, "MidIV", "mid_iv", "IV", "iv", "ImpliedVolatility", "implied_volatility");
+      // ThetaData GreeksAll uses the column name "implied_vol" (confirmed against live traffic).
+      // Keep the broader alias list for any other provider that might use a different name.
+      const iv  = tdGetNum(row, "implied_vol", "MidIV", "mid_iv", "IV", "iv", "ImpliedVolatility", "implied_volatility");
       if (iv <= 0) continue;
 
       if (exp === nearExp) greekMapNear.set(key, { iv });
@@ -2457,13 +2468,13 @@ export class ThetaDataProvider implements IMarketDataProvider {
         const longCallRow = greekRows.find(r => {
           const exp = tdGetStr(r, "Expiration", "expiration");
           const st  = tdGetNum(r, "Strike", "strike");
-          const rt  = tdGetStr(r, "Right", "right", "CallPut", "call_put").toUpperCase();
+          const rt  = tdNormalizeRight(tdGetStr(r, "Right", "right", "CallPut", "call_put"));
           return exp === longExp && st === bestCall.strike && rt === "C";
         });
         const longPutRow = greekRows.find(r => {
           const exp = tdGetStr(r, "Expiration", "expiration");
           const st  = tdGetNum(r, "Strike", "strike");
-          const rt  = tdGetStr(r, "Right", "right", "CallPut", "call_put").toUpperCase();
+          const rt  = tdNormalizeRight(tdGetStr(r, "Right", "right", "CallPut", "call_put"));
           return exp === longExp && st === bestPut.strike && rt === "P";
         });
 
@@ -2537,10 +2548,24 @@ export class ThetaDataProvider implements IMarketDataProvider {
 
       const metrics = this.buildLiquidityMetrics(quoteRows, greekRows, todayMs);
 
+      // If Yahoo Finance failed (price = 0), fall back to the underlying price
+      // embedded in the GreeksAll snapshot rows. This prevents maxSpreadForPrice()
+      // from using the wrong (<$100) spread-limit tier and misclassifying stocks.
+      const yahooPrice = yq?.price ?? 0;
+      const underlyingPrice = yahooPrice > 0
+        ? yahooPrice
+        : (() => {
+            for (const row of greekRows) {
+              const p = tdGetNum(row, "underlying_price");
+              if (p > 0) return p;
+            }
+            return 0;
+          })();
+
       return {
         symbol,
         company:             TICKER_NAMES[symbol] ?? symbol,
-        price:               parseFloat((yq?.price ?? 0).toFixed(2)),
+        price:               parseFloat(underlyingPrice.toFixed(2)),
         dailyChangePercent:  parseFloat((yq?.changePercent ?? 0).toFixed(2)),
         volume:              yq?.volume   ?? 0,
         avgVolume:           yq?.avgVolume ?? 0,
@@ -2642,11 +2667,11 @@ export class ThetaDataProvider implements IMarketDataProvider {
         const rows = await this.getOptionSnapshot("Quote", symbol, exp);
         for (const row of rows) {
           const strike = tdGetNum(row, "Strike", "strike");
-          const right  = tdGetStr(row, "Right",  "right", "CallPut", "call_put").toLowerCase();
-          if (!strike || (right !== "c" && right !== "p")) continue;
+          const right  = tdNormalizeRight(tdGetStr(row, "Right", "right", "CallPut", "call_put"));
+          if (!strike || (right !== "C" && right !== "P")) continue;
           const key   = `${exp}:${strike}`;
           const entry = contractMap.get(key) ?? {};
-          if (right === "c") entry.call = row; else entry.put = row;
+          if (right === "C") entry.call = row; else entry.put = row;
           contractMap.set(key, entry);
         }
       }

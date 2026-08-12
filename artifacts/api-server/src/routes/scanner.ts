@@ -27,7 +27,10 @@ const router: IRouter = Router();
 let lastScanResult: {
   stocks: ReturnType<typeof screeningEngine.runScreening>;
   totalScanned: number;
+  /** Stocks where every filter genuinely passed — no bypasses, no failures. */
   totalQualified: number;
+  /** Stocks where no filter failed but ≥1 was bypassed — surfaced for manual review. */
+  totalQualifiedWithCaveats: number;
   scanTime: string;
   dataAsOf: string;
   dataFreshness: { timestamp: string; source: "live" | "cached" };
@@ -57,6 +60,7 @@ router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
       stocks: [],
       totalScanned: 0,
       totalQualified: 0,
+      totalQualifiedWithCaveats: 0,
       scanTime: now,
       dataAsOf: now,
       dataFreshness: { timestamp: now, source: "live" },
@@ -74,6 +78,7 @@ router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
         stocks: results,
         totalScanned: results.length,
         totalQualified: results.filter((r) => r.qualified).length,
+        totalQualifiedWithCaveats: results.filter((r) => r.qualifiedWithCaveats).length,
         scanTime: scanTime.toISOString(),
         dataAsOf: new Date().toISOString(),
         dataFreshness,
@@ -84,6 +89,7 @@ router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
         {
           totalScanned: lastScanResult.totalScanned,
           totalQualified: lastScanResult.totalQualified,
+          totalQualifiedWithCaveats: lastScanResult.totalQualifiedWithCaveats,
         },
         "Scanner run complete"
       );

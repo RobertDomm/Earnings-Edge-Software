@@ -1,0 +1,2 @@
+- [ThetaData gRPC column names](thetadata-grpc-field-names.md) — right="CALL"/"PUT" (not "C"/"P"); IV field is "implied_vol" (not "MidIV"); both fixed via tdNormalizeRight() and updated alias list.
+- [Filter bypass for null data](filter-null-bypass.md) — Filters 2, 4, 5 pass (not fail) when earnings/IV data is null; needed for ThetaData mode which never supplies earnings dates or IV history.

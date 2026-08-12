@@ -8,7 +8,10 @@
 
 export interface FilterResult {
   name: string;
+  /** True when the filter genuinely evaluated the stock and the stock met the criterion. False when the stock failed OR when the filter was bypassed because required data is unavailable (see `bypassed`). */
   passed: boolean;
+  /** True when the filter could not be evaluated because required data is missing from the current data provider (e.g. ThetaData does not supply earnings dates). A bypassed filter is neither a pass nor a failure. Always false when `passed` is true. */
+  bypassed: boolean;
   calculatedValue: string;
   threshold: string;
   explanation: string;

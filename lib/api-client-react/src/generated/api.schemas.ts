@@ -85,17 +85,24 @@ export interface FilterList {
 
 export interface FilterResult {
   name: string;
+  /** True when the filter genuinely evaluated the stock and the stock met the criterion. False when the stock failed OR when the filter was bypassed because required data is unavailable (see `bypassed`). */
   passed: boolean;
+  /** True when the filter could not be evaluated because required data is missing from the current data provider (e.g. ThetaData does not supply earnings dates). A bypassed filter is neither a pass nor a failure. Always false when `passed` is true. */
+  bypassed: boolean;
   calculatedValue: string;
   threshold: string;
   explanation: string;
 }
 
+/**
+ * "qualified" — all 6 filters passed with real data. "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry. "not_qualified" — at least one filter genuinely failed.
+ */
 export type StockResultStatus = typeof StockResultStatus[keyof typeof StockResultStatus];
 
 
 export const StockResultStatus = {
   qualified: 'qualified',
+  qualified_with_caveats: 'qualified_with_caveats',
   not_qualified: 'not_qualified',
 } as const;
 
@@ -110,9 +117,14 @@ export interface StockResult {
   impliedVolatility: number;
   optionsVolume: number;
   openInterest: number;
+  /** 0–100 percentage of filters that either genuinely passed or were bypassed. Only genuine failures reduce this score. */
   filterScore: number;
+  /** "qualified" — all 6 filters passed with real data. "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry. "not_qualified" — at least one filter genuinely failed. */
   status: StockResultStatus;
+  /** True only when every filter genuinely passed — no bypasses, no failures. The strongest signal; review the stock normally. */
   qualified: boolean;
+  /** True when every filter either passed or was bypassed (none failed), but at least one filter was bypassed due to missing data. Requires manual verification of bypassed criteria before entry. */
+  qualifiedWithCaveats: boolean;
   filterResults: FilterResult[];
 }
 
@@ -137,7 +149,10 @@ export interface DataFreshness {
 export interface ScanResult {
   stocks: StockResult[];
   totalScanned: number;
+  /** Stocks where every filter genuinely passed — no bypasses, no failures. */
   totalQualified: number;
+  /** Stocks where no filter failed but at least one was bypassed due to missing provider data. */
+  totalQualifiedWithCaveats: number;
   scanTime: string;
   dataAsOf: string;
   dataFreshness: DataFreshness;
