@@ -12,7 +12,7 @@ import {
   getGetScannerResultsQueryKey,
   getGetMarketStatusQueryKey,
 } from "@workspace/api-client-react";
-import { LogOut, TerminalSquare } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 
@@ -140,7 +140,7 @@ export default function Dashboard() {
 
       <header className="border-b border-border bg-card/80 backdrop-blur-md z-10 sticky top-0 h-14 flex items-center justify-between px-6">
         <div className="flex items-center gap-3">
-          <TerminalSquare className="h-5 w-5 text-primary" />
+          <img src="/edgefinder-logo.png" alt="EdgeFinder" className="h-7 w-7 object-contain" />
           <h1 className="font-mono font-bold tracking-widest text-sm uppercase text-foreground">
             EdgeFinder{" "}
             <span className="text-muted-foreground opacity-50 ml-2">v0.1.0</span>

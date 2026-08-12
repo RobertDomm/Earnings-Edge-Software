@@ -2194,7 +2194,7 @@ export class ThetaDataProvider implements IMarketDataProvider {
         call.on("end",   () => resolve(chunks));
         call.on("error", (err: NodeJS.ErrnoException) => {
           // code 5 = NOT_FOUND — treat as empty result, not an error
-          if ((err as Record<string, unknown>)["code"] === 5) resolve([]);
+          if ((err as unknown as Record<string, unknown>)["code"] === 5) resolve([]);
           else reject(err);
         });
       });
