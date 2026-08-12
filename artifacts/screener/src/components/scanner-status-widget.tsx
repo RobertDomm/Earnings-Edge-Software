@@ -26,6 +26,7 @@ import {
   Activity,
   Pause,
   Zap,
+  AlertTriangle,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCompactNumber } from "@/lib/formatters";
@@ -93,6 +94,10 @@ export function ScannerStatusWidget({
     queryClient.invalidateQueries({ queryKey: getGetScannerResultsQueryKey() });
   };
 
+  const isServingCachedData =
+    scannerState?.lastScan?.dataFreshness?.source === "cached";
+  const cachedAt = scannerState?.lastScan?.dataFreshness?.timestamp;
+
   if (isLoading) {
     return (
       <Card className="rounded-none border-border/50 bg-black/40 shadow-none">
@@ -107,6 +112,17 @@ export function ScannerStatusWidget({
   return (
     <Card className="rounded-none border-border bg-black/40 shadow-none backdrop-blur-sm relative overflow-hidden flex-1">
       <div className="absolute top-0 left-0 w-1 h-full bg-primary/50" />
+
+      {isServingCachedData && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-950/60 border-b border-amber-600/40 text-amber-400">
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className="text-[11px] font-mono uppercase tracking-wider">
+            Market data API unreachable — showing cached data
+            {cachedAt ? ` from ${new Date(cachedAt).toLocaleTimeString()}` : ""}
+            . Results may be stale.
+          </span>
+        </div>
+      )}
 
       <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* ── Left: Run button + engine status ── */}

@@ -105,12 +105,31 @@ export interface StockResult {
   filterResults: FilterResult[];
 }
 
+/**
+ * "live" = just fetched from API; "cached" = returned from stale cache because the upstream was unreachable
+ */
+export type DataFreshnessSource = typeof DataFreshnessSource[keyof typeof DataFreshnessSource];
+
+
+export const DataFreshnessSource = {
+  live: 'live',
+  cached: 'cached',
+} as const;
+
+export interface DataFreshness {
+  /** ISO timestamp of when the data was fetched from the upstream source */
+  timestamp: string;
+  /** "live" = just fetched from API; "cached" = returned from stale cache because the upstream was unreachable */
+  source: DataFreshnessSource;
+}
+
 export interface ScanResult {
   stocks: StockResult[];
   totalScanned: number;
   totalQualified: number;
   scanTime: string;
   dataAsOf: string;
+  dataFreshness: DataFreshness;
 }
 
 export type ScannerStateStatus = typeof ScannerStateStatus[keyof typeof ScannerStateStatus];

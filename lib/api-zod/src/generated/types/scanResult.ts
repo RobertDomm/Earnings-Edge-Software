@@ -5,6 +5,7 @@
  * API specification for Circle-gated stock & options screener
  * OpenAPI spec version: 0.1.0
  */
+import type { DataFreshness } from './dataFreshness';
 import type { StockResult } from './stockResult';
 
 export interface ScanResult {
@@ -13,4 +14,5 @@ export interface ScanResult {
   totalQualified: number;
   scanTime: Date;
   dataAsOf: Date;
+  dataFreshness: DataFreshness;
 }

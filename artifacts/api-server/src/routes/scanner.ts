@@ -29,6 +29,7 @@ let lastScanResult: {
   totalQualified: number;
   scanTime: string;
   dataAsOf: string;
+  dataFreshness: { timestamp: string; source: "live" | "cached" };
 } | null = null;
 
 let scannerStatus: "idle" | "running" | "complete" | "error" = "idle";
@@ -44,13 +45,15 @@ router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
 
   // Respond immediately with the most recent scan result (may be from a
   // previous run).  The client polls GET /scanner/results for completion.
+  const now = new Date().toISOString();
   res.json(
     lastScanResult ?? {
       stocks: [],
       totalScanned: 0,
       totalQualified: 0,
-      scanTime: new Date().toISOString(),
-      dataAsOf: new Date().toISOString(),
+      scanTime: now,
+      dataAsOf: now,
+      dataFreshness: { timestamp: now, source: "live" },
     }
   );
 
@@ -58,7 +61,7 @@ router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
   const scanTime = new Date();
   void (async () => {
     try {
-      const stocks = await marketDataProvider.getStockUniverse();
+      const { stocks, dataFreshness } = await marketDataProvider.getStockUniverse();
       const results = screeningEngine.runScreening(stocks);
 
       lastScanResult = {
@@ -67,6 +70,7 @@ router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
         totalQualified: results.filter((r) => r.qualified).length,
         scanTime: scanTime.toISOString(),
         dataAsOf: new Date().toISOString(),
+        dataFreshness,
       };
       scannerStatus = "complete";
 

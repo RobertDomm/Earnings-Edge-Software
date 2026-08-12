@@ -132,7 +132,11 @@ export const RunScannerResponse = zod.object({
   "totalScanned": zod.number(),
   "totalQualified": zod.number(),
   "scanTime": zod.coerce.date(),
-  "dataAsOf": zod.coerce.date()
+  "dataAsOf": zod.coerce.date(),
+  "dataFreshness": zod.object({
+  "timestamp": zod.coerce.date().describe('ISO timestamp of when the data was fetched from the upstream source'),
+  "source": zod.enum(['live', 'cached']).describe('\"live\" = just fetched from API; \"cached\" = returned from stale cache because the upstream was unreachable')
+})
 })
 
 
@@ -169,7 +173,11 @@ export const GetScannerResultsResponse = zod.object({
   "totalScanned": zod.number(),
   "totalQualified": zod.number(),
   "scanTime": zod.coerce.date(),
-  "dataAsOf": zod.coerce.date()
+  "dataAsOf": zod.coerce.date(),
+  "dataFreshness": zod.object({
+  "timestamp": zod.coerce.date().describe('ISO timestamp of when the data was fetched from the upstream source'),
+  "source": zod.enum(['live', 'cached']).describe('\"live\" = just fetched from API; \"cached\" = returned from stale cache because the upstream was unreachable')
+})
 }),zod.null()]).optional().describe('Most recent scan result, or null if no scan has been run yet'),
   "lastScanTime": zod.coerce.date().nullish()
 })

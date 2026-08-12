@@ -70,9 +70,21 @@ export interface MarketStatusData {
   nextClose: Date | null;
 }
 
+export interface DataFreshness {
+  /** ISO timestamp of when the data was fetched from the upstream source */
+  timestamp: string;
+  /** "live" = just fetched; "cached" = returned from stale cache because the upstream was unreachable */
+  source: "live" | "cached";
+}
+
+export interface StockUniverseResult {
+  stocks: StockQuote[];
+  dataFreshness: DataFreshness;
+}
+
 export interface IMarketDataProvider {
-  /** Returns all stocks available for screening */
-  getStockUniverse(): Promise<StockQuote[]>;
+  /** Returns all stocks available for screening, plus data-freshness metadata */
+  getStockUniverse(): Promise<StockUniverseResult>;
   /** Returns quote for a single symbol, or null if not found */
   getStockQuote(symbol: string): Promise<StockQuote | null>;
   /** Returns the options chain for a symbol */
@@ -314,14 +326,20 @@ function mockMarketStatus(): MarketStatusData {
 export class MockMarketDataProvider implements IMarketDataProvider {
   readonly providerName = "MockMarketDataProvider";
 
-  async getStockUniverse(): Promise<StockQuote[]> {
-    return MOCK_STOCKS.map((s) => ({
-      ...s,
-      price: parseFloat((s.price * (1 + (Math.random() - 0.5) * 0.002)).toFixed(2)),
-      dailyChangePercent: parseFloat(
-        (s.dailyChangePercent + (Math.random() - 0.5) * 0.1).toFixed(2)
-      ),
-    }));
+  async getStockUniverse(): Promise<StockUniverseResult> {
+    return {
+      stocks: MOCK_STOCKS.map((s) => ({
+        ...s,
+        price: parseFloat((s.price * (1 + (Math.random() - 0.5) * 0.002)).toFixed(2)),
+        dailyChangePercent: parseFloat(
+          (s.dailyChangePercent + (Math.random() - 0.5) * 0.1).toFixed(2)
+        ),
+      })),
+      dataFreshness: {
+        timestamp: new Date().toISOString(),
+        source: "live",
+      },
+    };
   }
 
   async getStockQuote(symbol: string): Promise<StockQuote | null> {
@@ -612,6 +630,12 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
   private universeCache: UniverseCache | null = null;
 
   /**
+   * True when the last background refresh attempt failed and the cache
+   * is serving stale data.  Reset to false when a refresh succeeds.
+   */
+  private universeRefreshFailed = false;
+
+  /**
    * In-flight refresh promise — deduplicates concurrent refresh requests
    * so only one enrichment cycle runs at a time.
    */
@@ -645,6 +669,12 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
    * Triggers a background universe refresh if one is not already running.
    * Returns a promise that resolves when the refresh finishes (or rejects on
    * failure), so callers on the cold-start path can await it.
+   *
+   * If the fetch fails and a stale cache exists, the error is swallowed here:
+   * the cache is preserved and `universeRefreshFailed` is set to true so that
+   * `getStockUniverse()` can surface a staleness flag to callers.
+   * If the fetch fails and the cache is empty (cold-start), the error propagates
+   * so the caller can surface a meaningful error to the user.
    */
   private refreshUniverseCache(): Promise<void> {
     if (this.universeRefreshing) return this.universeRefreshing;
@@ -652,6 +682,19 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     this.universeRefreshing = this.fetchUniverseFromPolygon()
       .then((data) => {
         this.universeCache = { data, fetchedAt: Date.now() };
+        this.universeRefreshFailed = false;
+      })
+      .catch((err: unknown) => {
+        if (this.universeCache) {
+          // Stale cache exists — serve it with a staleness flag rather than failing.
+          this.universeRefreshFailed = true;
+          const msg = err instanceof Error ? err.message : String(err);
+          // Log inline since we can't import logger (circular dep risk); use console.warn.
+          console.warn(`[LiveMarketDataProvider] Universe refresh failed; serving stale cache. Reason: ${msg}`);
+        } else {
+          // No cache at all — propagate so the cold-start caller can surface the error.
+          throw err;
+        }
       })
       .finally(() => {
         this.universeRefreshing = null;
@@ -673,7 +716,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
    * HTTP request.  Callers of getStockUniverse() from within the background
    * scan task will block until data is ready, which is the intended behaviour.
    */
-  async getStockUniverse(): Promise<StockQuote[]> {
+  async getStockUniverse(): Promise<StockUniverseResult> {
     const cache = this.universeCache;
 
     if (cache) {
@@ -682,7 +725,17 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         // Stale-while-revalidate: return immediately, refresh in background.
         this.refreshUniverseCache().catch(() => {});
       }
-      return cache.data;
+      // Any data past its TTL is reported as "cached" — the consumer (scanner)
+      // sees this flag immediately on the first stale call, before the background
+      // refresh attempt even completes.  This avoids a race where an upstream
+      // failure is not surfaced until the second stale call.
+      return {
+        stocks: cache.data,
+        dataFreshness: {
+          timestamp: new Date(cache.fetchedAt).toISOString(),
+          source: isStale ? "cached" : "live",
+        },
+      };
     }
 
     // Cold start: wait for the first populate.
@@ -694,7 +747,13 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
           "Verify MARKET_DATA_API_KEY is valid and the Polygon.io API is reachable."
       );
     }
-    return fresh.data;
+    return {
+      stocks: fresh.data,
+      dataFreshness: {
+        timestamp: new Date(fresh.fetchedAt).toISOString(),
+        source: "live",
+      },
+    };
   }
 
   // -------------------------------------------------------------------------

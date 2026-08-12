@@ -133,9 +133,10 @@ function buildMockFetch(onRequest?: (url: string) => void): typeof fetch {
 describe("MockMarketDataProvider", () => {
   it("getStockUniverse returns stocks with all screening fields populated", async () => {
     const provider = new MockMarketDataProvider();
-    const stocks = await provider.getStockUniverse();
+    const { stocks, dataFreshness } = await provider.getStockUniverse();
 
     assert.ok(stocks.length > 0, "should return at least one stock");
+    assert.equal(dataFreshness.source, "live", "mock provider should always report source=live");
 
     for (const stock of stocks) {
       assert.ok(
@@ -224,7 +225,7 @@ describe("LiveMarketDataProvider universe cache", () => {
     async () => {
       // 10 000 RPM = 6 ms between requests — finite rate limiter, fast enough for tests
       const provider = new LiveMarketDataProvider("test-api-key", 10_000, 60);
-      const stocks = await provider.getStockUniverse();
+      const { stocks } = await provider.getStockUniverse();
 
       // All symbols in LIVE_STOCK_UNIVERSE should be enriched (mock returns data for all)
       assert.ok(
@@ -287,6 +288,35 @@ describe("LiveMarketDataProvider universe cache", () => {
     assert.ok(
       elapsed < 50,
       `cache hit should return in < 50 ms; took ${elapsed} ms`
+    );
+  });
+
+  it("returns source='cached' immediately when cache is past TTL (first stale call)", async () => {
+    // TTL = 0 so the cache is immediately stale after pre-warm.
+    const provider = new LiveMarketDataProvider("test-api-key", 10_000, 0);
+
+    // First call: cold-start path awaits pre-warm — result is always "live".
+    const first = await provider.getStockUniverse();
+    assert.equal(first.dataFreshness.source, "live", "cold-start must be live");
+    assert.ok(first.stocks.length > 0, "should return stocks after pre-warm");
+
+    // Second call: cache exists but TTL=0 so isStale=true on the very first
+    // stale call, before any background refresh has a chance to fail.
+    // source must be "cached" immediately — no race, no third call needed.
+    const stale = await provider.getStockUniverse();
+    assert.equal(
+      stale.dataFreshness.source,
+      "cached",
+      "stale cache must surface source='cached' on first call past TTL"
+    );
+    assert.ok(
+      stale.stocks.length > 0,
+      "stale stocks must still be returned when cache is past TTL"
+    );
+    assert.deepEqual(
+      stale.stocks.map((s) => s.symbol).sort(),
+      first.stocks.map((s) => s.symbol).sort(),
+      "same symbols must be returned from stale cache"
     );
   });
 

@@ -332,9 +332,22 @@ components:
           items:
             $ref: "#/components/schemas/FilterResult"
 
+    DataFreshness:
+      type: object
+      required: [timestamp, source]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO timestamp of when the data was fetched from the upstream source
+        source:
+          type: string
+          enum: [live, cached]
+          description: '"live" = just fetched from API; "cached" = returned from stale cache because the upstream was unreachable'
+
     ScanResult:
       type: object
-      required: [stocks, totalScanned, totalQualified, scanTime, dataAsOf]
+      required: [stocks, totalScanned, totalQualified, scanTime, dataAsOf, dataFreshness]
       properties:
         stocks:
           type: array
@@ -350,6 +363,8 @@ components:
         dataAsOf:
           type: string
           format: date-time
+        dataFreshness:
+          $ref: "#/components/schemas/DataFreshness"
 
     ScannerState:
       type: object
