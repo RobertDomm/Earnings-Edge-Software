@@ -9,51 +9,6 @@ import { Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { StockDetailPanel } from "./stock-detail-panel";
 import { useFlashMap } from "@/hooks/use-flash-map";
 
-// ── Filter 6 helper ──────────────────────────────────────────────────────────
-
-interface Filter6Data {
-  /** e.g. "207.5" */
-  callStrike: string;
-  /** e.g. "172.5" */
-  putStrike: string;
-  /** e.g. "+$1.24" */
-  callPeak: string;
-  /** e.g. "+$0.98" */
-  putPeak: string;
-}
-
-/**
- * Extracts the Filter 6 (Double Calendar Structure) trade details from a
- * stock's filterResults. Returns null when the stock is not overall-qualified,
- * when Filter 6 did not pass, or when the expected values aren't present.
- *
- * calculatedValue format: "+$1.24 call  /  +$0.98 put"
- * explanation format:     "Both risk-graph peaks are above zero — 207.5 call: +$1.24; 172.5 put: +$0.98. …"
- */
-function getFilter6Data(stock: StockResult): Filter6Data | null {
-  // Only show trade setup for stocks that passed every filter
-  if (!stock.qualified) return null;
-  const f6 = stock.filterResults.find((fr) => fr.name.startsWith("Filter 6"));
-  if (!f6 || !f6.passed) return null;
-
-  // Extract P&Ls from calculatedValue
-  const peakMatch = f6.calculatedValue.match(
-    /([+\-]\$[\d.]+)\s+call\s*\/\s*([+\-]\$[\d.]+)\s+put/
-  );
-  // Extract strikes from explanation
-  const strikeMatch = f6.explanation.match(
-    /([\d.]+)\s+call:.*?([\d.]+)\s+put:/
-  );
-
-  if (!peakMatch || !strikeMatch) return null;
-
-  return {
-    callStrike: strikeMatch[1],
-    putStrike: strikeMatch[2],
-    callPeak: peakMatch[1],
-    putPeak: peakMatch[2],
-  };
-}
 
 interface ResultsTableProps {
   stocks: StockResult[];
@@ -178,15 +133,12 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                 {renderSortableHeader("OI", "openInterest")}
                 {renderSortableHeader("Score", "filterScore")}
                 {renderSortableHeader("Status", "status")}
-                <TableHead className="whitespace-nowrap text-xs font-mono font-normal uppercase tracking-wider h-10 px-3 py-2 bg-muted/30">
-                  Setup
-                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className="divide-y divide-border/50">
               {filteredStocks.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={13} className="h-32 text-center text-muted-foreground font-mono text-sm">
+                  <TableCell colSpan={12} className="h-32 text-center text-muted-foreground font-mono text-sm">
                     No results found
                   </TableCell>
                 </TableRow>
@@ -270,24 +222,6 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                             >
                               {label}
                             </Badge>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell className="px-3 py-2.5 min-w-[130px]">
-                        {(() => {
-                          const f6 = getFilter6Data(stock);
-                          if (!f6) {
-                            return <span className="font-mono text-xs text-muted-foreground/40">—</span>;
-                          }
-                          return (
-                            <div className="flex flex-col gap-0.5">
-                              <span className="font-mono text-[11px] font-semibold text-foreground whitespace-nowrap">
-                                {f6.callStrike}c&nbsp;/&nbsp;{f6.putStrike}p
-                              </span>
-                              <span className="font-mono text-[10px] text-emerald-500 whitespace-nowrap">
-                                {f6.callPeak}&nbsp;/&nbsp;{f6.putPeak}
-                              </span>
-                            </div>
                           );
                         })()}
                       </TableCell>
