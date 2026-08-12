@@ -171,7 +171,7 @@ const MOCK_STOCKS: StockQuote[] = [
     optionsVolume: 482_300,
     openInterest: 1_240_500,
     sector: "tech",
-    nextEarningsDate: "2026-08-17", // 5 days → PASS F2
+    nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (window: 14–18d)
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.276, ivBeforeEarnings: 0.418, ivRose: true },
@@ -234,7 +234,7 @@ const MOCK_STOCKS: StockQuote[] = [
     optionsVolume: 2_341_800,
     openInterest: 4_821_600,
     sector: "automotive",
-    nextEarningsDate: "2026-08-24", // 12 days → PASS F2
+    nextEarningsDate: "2026-08-27", // 15 days → PASS F2 (but fails F4)
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948 }, // F5: 0.948/0.672=1.41 ✓ (but fails F4)
     earningsIvHistory: [ // 3/4 rise → FAIL F4 (IV dropped one cycle)
       { earningsDate: "2025-08-09", ivBaseline: 0.724, ivBeforeEarnings: 0.981, ivRose: true },
@@ -255,7 +255,7 @@ const MOCK_STOCKS: StockQuote[] = [
     optionsVolume: 412_900,
     openInterest: 1_102_400,
     sector: "tech",
-    nextEarningsDate: "2026-08-19", // 7 days → PASS F2
+    nextEarningsDate: "2026-08-29", // 17 days → PASS F2
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521 }, // F5: 0.521/0.341=1.53 ✓
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.342, ivBeforeEarnings: 0.524, ivRose: true },
@@ -276,7 +276,7 @@ const MOCK_STOCKS: StockQuote[] = [
     optionsVolume: 387_200,
     openInterest: 1_048_300,
     sector: "tech",
-    nextEarningsDate: "2026-08-30", // 18 days → FAIL F2
+    nextEarningsDate: "2026-08-14", // 2 days → FAIL F2 (too close — window opens at 14d)
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281 }, // F5: 0.281/0.274=1.03 — flat (earnings 18d away)
     earningsIvHistory: null, // earnings outside window; skip for mock clarity
   },
@@ -292,7 +292,7 @@ const MOCK_STOCKS: StockQuote[] = [
     optionsVolume: 1_284_700,
     openInterest: 2_937_100,
     sector: "tech",
-    nextEarningsDate: "2026-08-14", // 2 days → PASS F2
+    nextEarningsDate: "2026-08-28", // 16 days → PASS F2
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847 }, // F5: 0.847/0.594=1.43 ✓
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.581, ivBeforeEarnings: 0.842, ivRose: true },
@@ -329,7 +329,7 @@ const MOCK_STOCKS: StockQuote[] = [
     optionsVolume: 298_100,
     openInterest: 748_600,
     sector: "tech",
-    nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (boundary)
+    nextEarningsDate: "2026-08-28", // 16 days → PASS F2
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419 }, // F5: 0.419/0.231=1.81 ✓
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.271, ivBeforeEarnings: 0.413, ivRose: true },

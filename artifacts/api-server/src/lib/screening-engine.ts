@@ -98,25 +98,27 @@ const filter1: IFilterRule = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter 2 — Upcoming Earnings (within 14 days)
+// Filter 2 — Earnings in 2 Weeks (14–18 days out)
 //
-// The strategy trades options on stocks coming into an earnings announcement.
-// IV typically expands in the days before earnings, making options attractive.
+// The entry point is when earnings are exactly 2 weeks away — meaning the
+// earnings announcement falls somewhere in the target week (14–18 days out).
+// This covers any day of the earnings week (Mon–Fri = 5-day span).
 // Stocks with no earnings date (ETFs, unknowns) do not qualify.
 // ---------------------------------------------------------------------------
 
-const EARNINGS_WINDOW_DAYS = 14;
+const EARNINGS_WINDOW_MIN = 14;
+const EARNINGS_WINDOW_MAX = 18;
 
 const filter2: IFilterRule = {
-  name: "Filter 2 — Upcoming Earnings",
+  name: "Filter 2 — Earnings in 2 Weeks",
   evaluate(stock) {
     if (!stock.nextEarningsDate) {
       return {
         name: this.name,
         passed: false,
         calculatedValue: "No earnings date",
-        threshold: `Within ${EARNINGS_WINDOW_DAYS} days`,
-        explanation: `No upcoming earnings date found for ${stock.symbol} — cannot confirm an earnings catalyst within the window.`,
+        threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
+        explanation: `No upcoming earnings date found for ${stock.symbol} — cannot confirm a 2-week catalyst.`,
       };
     }
 
@@ -127,14 +129,7 @@ const filter2: IFilterRule = {
       (earningsDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    const passed = daysUntil >= 0 && daysUntil <= EARNINGS_WINDOW_DAYS;
-
-    const dayLabel =
-      daysUntil === 0
-        ? "today"
-        : daysUntil === 1
-        ? "tomorrow"
-        : `in ${daysUntil} day${daysUntil !== 1 ? "s" : ""}`;
+    const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
 
     return {
       name: this.name,
@@ -143,12 +138,14 @@ const filter2: IFilterRule = {
         daysUntil < 0
           ? `${Math.abs(daysUntil)}d ago`
           : `${daysUntil}d (${stock.nextEarningsDate})`,
-      threshold: `Within ${EARNINGS_WINDOW_DAYS} days`,
+      threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
       explanation: passed
-        ? `${stock.symbol} reports earnings ${dayLabel} (${stock.nextEarningsDate}) — IV expansion opportunity.`
+        ? `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — squarely in the 2-week entry window.`
         : daysUntil < 0
-        ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago (${stock.nextEarningsDate}). Next cycle not yet estimated.`
-        : `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}), which is outside the ${EARNINGS_WINDOW_DAYS}-day entry window.`,
+        ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Next cycle not yet estimated.`
+        : daysUntil < EARNINGS_WINDOW_MIN
+        ? `${stock.symbol} reports in ${daysUntil} days — too close to enter. The window opens at ${EARNINGS_WINDOW_MIN} days out.`
+        : `${stock.symbol} reports in ${daysUntil} days — too early. Enter when earnings are ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out.`,
     };
   },
 };
@@ -289,22 +286,22 @@ const filter4: IFilterRule = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter 5 — Verify Earnings Are Within 2 Weeks (final gate)
+// Filter 5 — Verify Earnings Are 2 Weeks Out (final gate)
 //
-// A direct re-confirmation that earnings fall within the 14-day entry window
-// before any position is considered. Filter 2 makes the initial cut;
-// Filter 5 is the explicit sign-off at the end of the checklist.
+// Final re-confirmation that earnings still fall in the 14–18 day window.
+// Filter 2 makes the initial cut; Filter 5 is the explicit sign-off at the
+// end of the checklist before a position is considered.
 // ---------------------------------------------------------------------------
 
 const filter5: IFilterRule = {
-  name: "Filter 5 — Earnings Within 2 Weeks",
+  name: "Filter 5 — Earnings Verified 2 Weeks Out",
   evaluate(stock) {
     if (!stock.nextEarningsDate) {
       return {
         name: this.name,
         passed: false,
         calculatedValue: "No earnings date",
-        threshold: "Earnings within 14 days",
+        threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
         explanation: `No confirmed earnings date for ${stock.symbol} — cannot verify the 2-week window.`,
       };
     }
@@ -315,12 +312,7 @@ const filter5: IFilterRule = {
     const daysUntil = Math.round(
       (earningsDate.getTime() - today.getTime()) / 86_400_000
     );
-    const passed = daysUntil >= 0 && daysUntil <= 14;
-
-    const dayLabel =
-      daysUntil === 0 ? "today"
-      : daysUntil === 1 ? "tomorrow"
-      : `in ${daysUntil} days`;
+    const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
 
     return {
       name: this.name,
@@ -329,12 +321,14 @@ const filter5: IFilterRule = {
         daysUntil < 0
           ? `${Math.abs(daysUntil)}d ago`
           : `${daysUntil}d (${stock.nextEarningsDate})`,
-      threshold: "Earnings within 14 days",
+      threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
       explanation: passed
-        ? `✔ Confirmed: ${stock.symbol} reports earnings ${dayLabel} (${stock.nextEarningsDate}) — within the 2-week entry window.`
+        ? `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — in the 2-week entry window.`
         : daysUntil < 0
         ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Waiting for next cycle.`
-        : `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — outside the 14-day entry window.`,
+        : daysUntil < EARNINGS_WINDOW_MIN
+        ? `${stock.symbol} reports in ${daysUntil} days — window has closed. Too late to enter.`
+        : `${stock.symbol} reports in ${daysUntil} days — not yet in the entry window.`,
     };
   },
 };
