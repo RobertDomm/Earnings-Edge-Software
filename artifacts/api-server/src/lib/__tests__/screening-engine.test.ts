@@ -9,7 +9,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { FILTER_RULES, getFilterDefinitions } from "../screening-engine.js";
+import { FILTER_RULES, ScreeningEngine, getFilterDefinitions } from "../screening-engine.js";
 import type { StockQuote } from "../market-data.js";
 
 // ---------------------------------------------------------------------------
@@ -939,5 +939,134 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
       "No calendar data",
       `calculatedValue must be 'No calendar data' when putCalendarPeak is null (got: "${result.calculatedValue}")`
     );
+  });
+});
+
+// ===========================================================================
+// ScreeningEngine — end-to-end integration: all 6 filters
+// ===========================================================================
+
+/**
+ * A stock fixture that satisfies every filter requirement:
+ *
+ *   Filter 1 — sector "tech" is not excluded
+ *   Filter 2 — earnings 16 days out (inside the 14–18 day window)
+ *   Filter 3 — weekly options, penny increments, spread $0.09 < $0.10 limit (price $99)
+ *   Filter 4 — 4/4 IV cycles show ivRose=true
+ *   Filter 5 — same earnings date as Filter 2 — re-confirmed in window
+ *   Filter 6 — callCalendarPeak $1.50 > 0, putCalendarPeak $1.20 > 0
+ */
+function fullyQualifiedStock(): StockQuote {
+  return {
+    symbol: "QUAL",
+    company: "Qualified Corp",
+    price: 99,
+    dailyChangePercent: 0.5,
+    volume: 2_000_000,
+    avgVolume: 1_500_000,
+    marketCap: 10_000_000_000,
+    impliedVolatility: 0.35,
+    optionsVolume: 200_000,
+    openInterest: 800_000,
+    sector: "tech",
+    nextEarningsDate: dateFromFixed(16),
+    liquidityMetrics: {
+      hasWeeklyOptions: true,
+      hasPennyIncrements: true,
+      nearTermSpread: 0.09,
+      nearTermDte: 11,
+      nearTermIv: 0.35,
+      shortCallStrike: 105,
+      shortPutStrike: 93,
+      callCalendarPeak: 1.50,
+      putCalendarPeak: 1.20,
+    },
+    earningsIvHistory: [
+      { earningsDate: "2025-08-09", ivBaseline: 0.28, ivBeforeEarnings: 0.41, ivRose: true },
+      { earningsDate: "2025-11-07", ivBaseline: 0.30, ivBeforeEarnings: 0.45, ivRose: true },
+      { earningsDate: "2026-02-06", ivBaseline: 0.27, ivBeforeEarnings: 0.39, ivRose: true },
+      { earningsDate: "2026-05-08", ivBaseline: 0.31, ivBeforeEarnings: 0.46, ivRose: true },
+    ],
+  };
+}
+
+describe("ScreeningEngine — end-to-end: fully-qualified stock passes all 6 filters", () => {
+  const engine = new ScreeningEngine(FILTER_RULES);
+
+  it("qualified is true", () => {
+    const result = engine.evaluateStock(fullyQualifiedStock(), FIXED_TODAY);
+    assert.equal(result.qualified, true, "a stock satisfying all filters must have qualified=true");
+  });
+
+  it("status is 'qualified'", () => {
+    const result = engine.evaluateStock(fullyQualifiedStock(), FIXED_TODAY);
+    assert.equal(result.status, "qualified", "status must be 'qualified'");
+  });
+
+  it("filterScore is 100", () => {
+    const result = engine.evaluateStock(fullyQualifiedStock(), FIXED_TODAY);
+    assert.equal(result.filterScore, 100, "filterScore must be 100 when all filters pass");
+  });
+
+  it("filterResults has exactly 6 entries — one per active rule", () => {
+    const result = engine.evaluateStock(fullyQualifiedStock(), FIXED_TODAY);
+    assert.equal(
+      result.filterResults.length,
+      FILTER_RULES.length,
+      `filterResults must have ${FILTER_RULES.length} entries (got ${result.filterResults.length})`
+    );
+  });
+
+  it("every filterResult has passed=true", () => {
+    const result = engine.evaluateStock(fullyQualifiedStock(), FIXED_TODAY);
+    for (const fr of result.filterResults) {
+      assert.equal(
+        fr.passed,
+        true,
+        `filterResult "${fr.name}" must have passed=true (got false — explanation: "${fr.explanation}")`
+      );
+    }
+  });
+
+  it("filterResults are in the same order as FILTER_RULES", () => {
+    const result = engine.evaluateStock(fullyQualifiedStock(), FIXED_TODAY);
+    for (let i = 0; i < FILTER_RULES.length; i++) {
+      assert.equal(
+        result.filterResults[i].name,
+        FILTER_RULES[i].name,
+        `filterResults[${i}].name must match FILTER_RULES[${i}].name`
+      );
+    }
+  });
+
+  it("result carries through the stock's display fields unchanged", () => {
+    const stock = fullyQualifiedStock();
+    const result = engine.evaluateStock(stock, FIXED_TODAY);
+    assert.equal(result.symbol,           stock.symbol);
+    assert.equal(result.company,          stock.company);
+    assert.equal(result.price,            stock.price);
+    assert.equal(result.dailyChangePercent, stock.dailyChangePercent);
+    assert.equal(result.volume,           stock.volume);
+    assert.equal(result.avgVolume,        stock.avgVolume);
+    assert.equal(result.marketCap,        stock.marketCap);
+    assert.equal(result.impliedVolatility, stock.impliedVolatility);
+    assert.equal(result.optionsVolume,    stock.optionsVolume);
+    assert.equal(result.openInterest,     stock.openInterest);
+  });
+});
+
+describe("ScreeningEngine — end-to-end: flipping one field causes disqualification", () => {
+  const engine = new ScreeningEngine(FILTER_RULES);
+
+  it("setting callCalendarPeak=0 causes qualified=false (Filter 6 rejects)", () => {
+    const stock = fullyQualifiedStock();
+    stock.liquidityMetrics!.callCalendarPeak = 0;
+    const result = engine.evaluateStock(stock, FIXED_TODAY);
+    assert.equal(result.qualified, false, "callCalendarPeak=0 must cause qualified=false");
+    assert.equal(result.status, "not_qualified", "status must be 'not_qualified'");
+    assert.ok(result.filterScore < 100, `filterScore must be below 100 (got ${result.filterScore})`);
+    const f6 = result.filterResults.find((r) => r.name.includes("Filter 6"));
+    assert.ok(f6, "Filter 6 result must exist");
+    assert.equal(f6!.passed, false, "Filter 6 must be the one that failed");
   });
 });
