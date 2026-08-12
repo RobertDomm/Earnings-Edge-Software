@@ -20,6 +20,7 @@
  */
 
 import type { ICircleAuthService, AuthCheckResult, CircleUser } from "./circle-auth.js";
+import { LiveCircleAuthService } from "./live-circle-auth.js";
 
 const MOCK_AUTHORIZED_USER: CircleUser = {
   id: "mock-user-001",
@@ -107,26 +108,12 @@ export function createCircleAuthService(): ICircleAuthService {
     return new MockCircleAuthService();
   }
 
-  // LIVE MODE — not yet implemented
-  // To implement, create LiveCircleAuthService and return it here:
-  //
-  // Required env vars for live mode:
-  //   CIRCLE_CLIENT_ID         — OAuth client ID from Circle developer settings
-  //   CIRCLE_CLIENT_SECRET     — OAuth client secret
-  //   CIRCLE_COMMUNITY_ID      — Circle community identifier
-  //   CIRCLE_REQUIRED_SPACE_GROUP_ID — Space Group ID that grants access
-  //   CIRCLE_API_TOKEN         — API token for Space Group membership checks
-  //
-  // return new LiveCircleAuthService({
-  //   clientId: process.env.CIRCLE_CLIENT_ID!,
-  //   clientSecret: process.env.CIRCLE_CLIENT_SECRET!,
-  //   communityId: process.env.CIRCLE_COMMUNITY_ID!,
-  //   requiredSpaceGroupId: process.env.CIRCLE_REQUIRED_SPACE_GROUP_ID!,
-  //   apiToken: process.env.CIRCLE_API_TOKEN!,
-  // });
-
-  throw new Error(
-    `CIRCLE_AUTH_MODE="${mode}" is not yet implemented. ` +
-      "Implement LiveCircleAuthService or set CIRCLE_AUTH_MODE=mock for development."
-  );
+  // LIVE MODE — uses LiveCircleAuthService with real Circle OAuth
+  return new LiveCircleAuthService({
+    clientId:             process.env.CIRCLE_CLIENT_ID!,
+    clientSecret:         process.env.CIRCLE_CLIENT_SECRET!,
+    communityId:          process.env.CIRCLE_COMMUNITY_ID!,
+    requiredSpaceGroupId: process.env.CIRCLE_REQUIRED_SPACE_GROUP_ID!,
+    apiToken:             process.env.CIRCLE_API_TOKEN!,
+  });
 }
