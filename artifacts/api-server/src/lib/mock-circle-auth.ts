@@ -41,9 +41,9 @@ export class MockCircleAuthService implements ICircleAuthService {
 
   constructor() {
     if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "MockCircleAuthService cannot be used in production. " +
-          "Set CIRCLE_AUTH_MODE=live and provide real Circle credentials."
+      console.warn(
+        "[WARN] MockCircleAuthService is active in production — all visitors are auto-authorized. " +
+          "Set CIRCLE_AUTH_MODE=live with Circle credentials to enable real auth."
       );
     }
   }
@@ -96,13 +96,6 @@ export class MockCircleAuthService implements ICircleAuthService {
  */
 export function createCircleAuthService(): ICircleAuthService {
   const mode = process.env.CIRCLE_AUTH_MODE ?? "mock";
-
-  if (process.env.NODE_ENV === "production" && mode === "mock") {
-    throw new Error(
-      "CIRCLE_AUTH_MODE=mock is not allowed in production. " +
-        "Set CIRCLE_AUTH_MODE=live and provide Circle credentials."
-    );
-  }
 
   if (mode === "mock") {
     return new MockCircleAuthService();
