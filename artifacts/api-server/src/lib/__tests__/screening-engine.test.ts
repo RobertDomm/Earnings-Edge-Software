@@ -350,6 +350,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.05,
         nearTermDte: 11,
         nearTermIv: 0.3,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -369,6 +370,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.05,
         nearTermDte: 11,
         nearTermIv: 0.3,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -391,6 +393,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.35,
         nearTermDte: 11,
         nearTermIv: 0.3,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -411,6 +414,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.09,
         nearTermDte: 11,
         nearTermIv: 0.3,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -442,11 +446,11 @@ describe("Filter 3 — Options Liquidity: spread tier boundaries", () => {
     it(`$${price} stock: spread $${spreadOk} passes, $${spreadFail} fails (limit ${limit})`, () => {
       const goodStock = baseStock({
         price,
-        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadOk, nearTermDte: 11, nearTermIv: 0.3 },
+        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadOk, nearTermDte: 11, nearTermIv: 0.3, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null },
       });
       const badStock = baseStock({
         price,
-        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadFail, nearTermDte: 11, nearTermIv: 0.3 },
+        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadFail, nearTermDte: 11, nearTermIv: 0.3, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null },
       });
       assert.equal(filter3.evaluate(goodStock).passed, true,  `spread $${spreadOk} on $${price} stock must pass`);
       assert.equal(filter3.evaluate(badStock).passed,  false, `spread $${spreadFail} on $${price} stock must fail`);

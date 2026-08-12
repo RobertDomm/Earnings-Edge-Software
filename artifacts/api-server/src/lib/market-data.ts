@@ -135,6 +135,32 @@ export interface OptionsLiquidityMetrics {
    * the options market is pricing in an upcoming earnings event.
    */
   nearTermIv: number | null;
+  /**
+   * Strike price of the OTM call chosen for the short leg of the double calendar
+   * (priced 30–60 cents at ~11 DTE). Null when no suitable contract was found.
+   * Used by Filter 6.
+   */
+  shortCallStrike: number | null;
+  /**
+   * Strike price of the OTM put chosen for the short leg of the double calendar
+   * (priced 30–60 cents at ~11 DTE). Null when no suitable contract was found.
+   * Used by Filter 6.
+   */
+  shortPutStrike: number | null;
+  /**
+   * Peak P&L (in $) of the call-side calendar at the short's expiry, if the stock
+   * lands exactly at shortCallStrike. Positive = peak above zero line (good).
+   * = bsAtm(shortCallStrike, long18DteIV, 7d) − totalCalendarDebit
+   * Null when data is insufficient. Used by Filter 6.
+   */
+  callCalendarPeak: number | null;
+  /**
+   * Peak P&L (in $) of the put-side calendar at the short's expiry, if the stock
+   * lands exactly at shortPutStrike. Positive = peak above zero line (good).
+   * = bsAtm(shortPutStrike, long18DteIV, 7d) − totalCalendarDebit
+   * Null when data is insufficient. Used by Filter 6.
+   */
+  putCalendarPeak: number | null;
 }
 
 export interface StockUniverseResult {
@@ -172,7 +198,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_240_500,
     sector: "tech",
     nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (window: 14–18d)
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451 },
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451, shortCallStrike: 207.5, shortPutStrike: 172.5, callCalendarPeak: 1.24, putCalendarPeak: 0.98 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.276, ivBeforeEarnings: 0.418, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.312, ivBeforeEarnings: 0.467, ivRose: true },
@@ -193,7 +219,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 3_482_100,
     sector: "tech",
     nextEarningsDate: "2026-09-05", // 24 days → FAIL F2
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548 }, // FAIL F3 (spread); F5: 0.548/0.512=1.07 — no elevation (earnings 24d away)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3 (spread)
     earningsIvHistory: [ // 4/4 rise (solid pattern but fails F2+F3)
       { earningsDate: "2025-08-09", ivBaseline: 0.512, ivBeforeEarnings: 0.781, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.548, ivBeforeEarnings: 0.824, ivRose: true },
@@ -214,7 +240,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 892_300,
     sector: "tech",
     nextEarningsDate: "2026-09-10", // 29 days → FAIL F2
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214 }, // F5: 0.214/0.198=1.08 — flat (earnings 29d away)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214, shortCallStrike: 452.5, shortPutStrike: 377.5, callCalendarPeak: 2.87, putCalendarPeak: 2.41 }, // FAIL F2 (earnings 29d away)
     earningsIvHistory: [ // 4/4 rise (would qualify if earnings were in window)
       { earningsDate: "2025-08-09", ivBaseline: 0.198, ivBeforeEarnings: 0.281, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.214, ivBeforeEarnings: 0.306, ivRose: true },
@@ -235,7 +261,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 4_821_600,
     sector: "automotive",
     nextEarningsDate: "2026-08-27", // 15 days → PASS F2 (but fails F4)
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948 }, // F5: 0.948/0.672=1.41 ✓ (but fails F4)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948, shortCallStrike: 272.5, shortPutStrike: 225.0, callCalendarPeak: 3.82, putCalendarPeak: 3.14 }, // FAIL F4
     earningsIvHistory: [ // 3/4 rise → FAIL F4 (IV dropped one cycle)
       { earningsDate: "2025-08-09", ivBaseline: 0.724, ivBeforeEarnings: 0.981, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.681, ivBeforeEarnings: 0.823, ivRose: true },
@@ -256,7 +282,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_102_400,
     sector: "tech",
     nextEarningsDate: "2026-08-29", // 17 days → PASS F2
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521 }, // F5: 0.521/0.341=1.53 ✓
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521, shortCallStrike: 560.0, shortPutStrike: 467.5, callCalendarPeak: 3.42, putCalendarPeak: 2.91 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.342, ivBeforeEarnings: 0.524, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.378, ivBeforeEarnings: 0.563, ivRose: true },
@@ -277,7 +303,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_048_300,
     sector: "tech",
     nextEarningsDate: "2026-08-14", // 2 days → FAIL F2 (too close — window opens at 14d)
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281 }, // F5: 0.281/0.274=1.03 — flat (earnings 18d away)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281, shortCallStrike: 210.0, shortPutStrike: 177.5, callCalendarPeak: 1.48, putCalendarPeak: 1.22 }, // FAIL F2 (earnings 2d away)
     earningsIvHistory: null, // earnings outside window; skip for mock clarity
   },
   {
@@ -293,7 +319,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 2_937_100,
     sector: "tech",
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847 }, // F5: 0.847/0.594=1.43 ✓
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847, shortCallStrike: 185.0, shortPutStrike: 152.5, callCalendarPeak: 2.31, putCalendarPeak: 1.87 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.581, ivBeforeEarnings: 0.842, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.623, ivBeforeEarnings: 0.908, ivRose: true },
@@ -314,7 +340,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 12_483_200,
     sector: "etf",
     nextEarningsDate: null, // ETF — no earnings → FAIL F2
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.05, nearTermDte: 7, nearTermIv: 0.145 }, // F5: 0.145/0.142=1.02 — flat (ETF, no earnings)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.05, nearTermDte: 7, nearTermIv: 0.145, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // ETF — no calendar structure
     earningsIvHistory: null, // ETF — no earnings cycle
   },
   {
@@ -330,7 +356,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 748_600,
     sector: "tech",
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419 }, // F5: 0.419/0.231=1.81 ✓
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419, shortCallStrike: 197.5, shortPutStrike: 162.5, callCalendarPeak: -0.43, putCalendarPeak: 1.18 }, // FAIL F6 — call peak below zero
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.271, ivBeforeEarnings: 0.413, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.303, ivBeforeEarnings: 0.447, ivRose: true },
@@ -351,7 +377,7 @@ const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_823_700,
     sector: "tech",
     nextEarningsDate: "2026-09-01", // 20 days → FAIL F2
-    liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null }, // FAIL F3; no near-term IV
+    liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3
     earningsIvHistory: null,
   },
   // --- Sector-excluded demo stocks (fail Filter 1 in mock mode) ---
@@ -825,6 +851,23 @@ function realizedVol(closes: number[]): number {
   const mean = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
   const variance = logReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / logReturns.length;
   return Math.sqrt(variance * 252); // annualize: √(daily variance × 252 trading days)
+}
+
+/**
+ * Black-Scholes ATM option value approximation (call = put when S = K, r = 0).
+ *
+ * Derivation: when stock = strike and interest rate ≈ 0,
+ *   d1 ≈ σ√T/2 ≈ 0 for small T  →  N(d1) ≈ N'(d1) ≈ 0.3989 (standard normal PDF at 0)
+ *   C ≈ S × σ × √T × N'(0)  =  S × σ × √T × 0.3989422804
+ *
+ * Accurate to ~2% for typical short-dated options (T < 30 days) and normal IV levels.
+ *
+ * @param strike  The option strike price (= current stock price for ATM)
+ * @param iv      Annualised implied volatility (e.g. 0.30 for 30%)
+ * @param t       Time to expiry in years (e.g. 7/365 for 7 days)
+ */
+function bsAtmValue(strike: number, iv: number, t: number): number {
+  return strike * iv * Math.sqrt(t) * 0.3989422804;
 }
 
 // ---------------------------------------------------------------------------
@@ -1376,11 +1419,101 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
       }
     }
 
+    // --- Filter 6: Double calendar structure ---
+    // Find the longer-term expiry closest to 18 DTE (in the 14–22 DTE range).
+    let longerTermExpiry: string | null = null;
+    let longerTermDte: number | null = null;
+    {
+      let minDiff2 = Infinity;
+      for (const expiry of expiryDates) {
+        const dte = Math.round(
+          (new Date(expiry + "T00:00:00").getTime() - todayMs) / 86_400_000
+        );
+        if (dte < 14 || dte > 22) continue;
+        const diff = Math.abs(dte - 18);
+        if (diff < minDiff2) { minDiff2 = diff; longerTermExpiry = expiry; longerTermDte = dte; }
+      }
+    }
+
+    let shortCallStrike: number | null = null;
+    let shortPutStrike: number | null = null;
+    let callCalendarPeak: number | null = null;
+    let putCalendarPeak: number | null = null;
+
+    if (nearTermExpiry && longerTermExpiry) {
+      const nearContracts  = byExpiry.get(nearTermExpiry)  ?? [];
+      const longerContracts = byExpiry.get(longerTermExpiry) ?? [];
+
+      // Build a strike → {call, put} lookup for the ~18 DTE chain.
+      const longByStrike = new Map<number, { call?: PolygonOptionsResult; put?: PolygonOptionsResult }>();
+      for (const r of longerContracts) {
+        const strike = r.details?.strike_price;
+        const type   = r.details?.contract_type;
+        if (strike == null || !type) continue;
+        if (!longByStrike.has(strike)) longByStrike.set(strike, {});
+        const slot = longByStrike.get(strike)!;
+        if (type === "call") slot.call = r; else slot.put = r;
+      }
+
+      const midOf = (r: PolygonOptionsResult) =>
+        ((r.last_quote?.bid ?? 0) + (r.last_quote?.ask ?? 0)) / 2;
+      const in30to60 = (r: PolygonOptionsResult) => { const m = midOf(r); return m >= 0.30 && m <= 0.60; };
+
+      // OTM call: highest-strike call priced 30–60¢ (most OTM while still liquid)
+      const shortCallR = nearContracts
+        .filter(r => r.details?.contract_type === "call" && in30to60(r))
+        .sort((a, b) => (b.details?.strike_price ?? 0) - (a.details?.strike_price ?? 0))[0];
+
+      // OTM put: lowest-strike put priced 30–60¢ (most OTM while still liquid)
+      const shortPutR = nearContracts
+        .filter(r => r.details?.contract_type === "put" && in30to60(r))
+        .sort((a, b) => (a.details?.strike_price ?? 0) - (b.details?.strike_price ?? 0))[0];
+
+      if (shortCallR && shortPutR) {
+        const cStrike = shortCallR.details!.strike_price!;
+        const pStrike = shortPutR.details!.strike_price!;
+        const longCallR = longByStrike.get(cStrike)?.call;
+        const longPutR  = longByStrike.get(pStrike)?.put;
+
+        if (longCallR && longPutR) {
+          const shortCallMid = midOf(shortCallR);
+          const shortPutMid  = midOf(shortPutR);
+          const longCallMid  = midOf(longCallR);
+          const longPutMid   = midOf(longPutR);
+          const longCallIv   = safeNum(longCallR.implied_volatility);
+          const longPutIv    = safeNum(longPutR.implied_volatility);
+
+          if (longCallMid > 0 && longPutMid > 0 && longCallIv > 0 && longPutIv > 0) {
+            shortCallStrike = cStrike;
+            shortPutStrike  = pStrike;
+
+            const callDebit   = longCallMid - shortCallMid;
+            const putDebit    = longPutMid  - shortPutMid;
+            const totalDebit  = callDebit + putDebit;
+
+            // Days remaining on the long after the short expires.
+            const remainDays = (longerTermDte ?? 18) - (nearTermDte ?? 11);
+            const remainT    = Math.max(remainDays, 1) / 365;
+
+            callCalendarPeak = parseFloat(
+              (bsAtmValue(cStrike, longCallIv, remainT) - totalDebit).toFixed(2)
+            );
+            putCalendarPeak = parseFloat(
+              (bsAtmValue(pStrike, longPutIv, remainT) - totalDebit).toFixed(2)
+            );
+          }
+        }
+      }
+    }
+
     return {
       optionsVolume,
       openInterest,
       impliedVolatility: median(ivValues),
-      liquidityMetrics: { hasWeeklyOptions, hasPennyIncrements, nearTermSpread, nearTermDte, nearTermIv },
+      liquidityMetrics: {
+        hasWeeklyOptions, hasPennyIncrements, nearTermSpread, nearTermDte, nearTermIv,
+        shortCallStrike, shortPutStrike, callCalendarPeak, putCalendarPeak,
+      },
     };
   }
 
