@@ -673,4 +673,111 @@ describe("Session persistence across server restarts", () => {
 
     await stopServer(server.server);
   });
+
+  // ── Server-side session revocation: deleted row is rejected ──────────────
+  //
+  // What this proves
+  // ─────────────────
+  // An admin action, account deletion, or forced sign-out from a separate
+  // device may remove the session row directly from PostgreSQL while the
+  // browser still holds the signed cookie. connect-pg-simple must treat a
+  // missing row as unauthenticated rather than silently passing the request
+  // through.
+  //
+  // Steps
+  // ──────
+  // 1. Log in to obtain a valid signed cookie and a session row in PostgreSQL.
+  // 2. Delete the session row directly from the `session` table (server-side
+  //    revocation — the browser cookie is untouched).
+  // 3. Confirm the row is absent.
+  // 4. Start a fresh server instance (no in-memory session cache).
+  // 5. Replay the original cookie.
+  // 6. Assert authenticated: false — the missing row must not be treated as valid.
+  // Cleanup is idempotent: afterEach DELETE on a non-existent row is a no-op.
+
+  it("replaying a cookie whose session row was deleted returns authenticated false", async () => {
+    // ── Step 1: Log in to get a valid session cookie ──────────────────────
+    const serverA = await startServer();
+
+    const loginRes = await fetch(`${serverA.url}/test-login`, {
+      method: "POST",
+    });
+    assert.equal(
+      loginRes.status,
+      200,
+      `Login must return 200 (got ${loginRes.status})`,
+    );
+
+    const loginBody = (await loginRes.json()) as {
+      ok: boolean;
+      sessionId: string;
+    };
+    const sessionId = loginBody.sessionId;
+
+    // Register for cleanup. afterEach will attempt DELETE on this id —
+    // safe because the row will already be gone and DELETE on a missing
+    // row is a no-op in PostgreSQL.
+    sessionIdsToCleanup.push(sessionId);
+
+    const cookieValue = extractCookieValue(loginRes.headers.get("set-cookie"));
+
+    // Confirm the session is authenticated before revocation.
+    const preRevokeRes = await fetch(`${serverA.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    const preRevokeBody = (await preRevokeRes.json()) as {
+      authenticated: boolean;
+    };
+    assert.equal(
+      preRevokeBody.authenticated,
+      true,
+      "Session must be authenticated before the row is deleted",
+    );
+
+    // ── Step 2: Delete the session row directly from PostgreSQL ───────────
+    // Simulates server-side revocation (admin action, account deletion, or
+    // forced sign-out from another device). The browser cookie is untouched.
+    await sharedPool.query(`DELETE FROM "session" WHERE sid = $1`, [sessionId]);
+
+    // ── Step 3: Confirm the row is absent ─────────────────────────────────
+    const checkRes = await sharedPool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM "session" WHERE sid = $1`,
+      [sessionId],
+    );
+    assert.equal(
+      checkRes.rows[0].count,
+      "0",
+      "Session row must be absent from PostgreSQL after direct DELETE",
+    );
+
+    // ── Step 4: Stop Server A and start a fresh Server B ─────────────────
+    // A fresh server has no in-memory session cache so it must go to
+    // PostgreSQL — where the row no longer exists.
+    await stopServer(serverA.server);
+    const serverB = await startServer();
+
+    // ── Step 5: Replay the original cookie on Server B ────────────────────
+    const replayRes = await fetch(`${serverB.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    assert.equal(
+      replayRes.status,
+      200,
+      `Status route must return 200 even when the session row is gone (got ${replayRes.status})`,
+    );
+
+    // ── Step 6: Assert the replayed cookie is rejected ────────────────────
+    const replayBody = (await replayRes.json()) as {
+      authenticated: boolean;
+      userId: string | null;
+    };
+    assert.equal(
+      replayBody.authenticated,
+      false,
+      "A cookie whose session row was deleted must not be authenticated " +
+        `(userId: ${replayBody.userId}, authenticated: ${replayBody.authenticated})`,
+    );
+
+    await stopServer(serverB.server);
+  });
 });
