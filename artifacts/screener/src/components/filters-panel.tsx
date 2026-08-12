@@ -76,21 +76,6 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
                   <span className="text-xs font-mono text-muted-foreground">
                     {f.name}
                   </span>
-                  {f.implemented ? (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] font-mono tracking-wider rounded-none px-1.5 py-0 border-solid shrink-0"
-                    >
-                      {f.threshold}
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] font-mono tracking-wider rounded-none px-1.5 py-0 opacity-50 border-dashed shrink-0"
-                    >
-                      PENDING CONFIG
-                    </Badge>
-                  )}
                 </div>
                 <p className="text-[11px] font-mono text-muted-foreground opacity-60 leading-tight">
                   {f.description}
