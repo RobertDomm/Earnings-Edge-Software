@@ -2059,12 +2059,14 @@ async function fetchYahooStockQuotes(
       const r = data.chart?.result?.[0];
       if (!r) return;
       const m = r.meta ?? {};
-      const price    = Number(m["regularMarketPrice"] ?? 0);
-      const prevClose = Number(m["chartPreviousClose"] ?? price);
+      const price  = Number(m["regularMarketPrice"] ?? 0);
+      const volume = Math.round(Number(m["regularMarketVolume"] ?? 0));
+      // Compute avgVolume and daily change from historical OHLCV data.
+      const closes  = r.indicators?.quote?.[0]?.close?.filter((v): v is number => v != null) ?? [];
+      const volumes = r.indicators?.quote?.[0]?.volume?.filter((v): v is number => v != null) ?? [];
+      // Daily change = today vs. previous session's close (last two entries in closes array).
+      const prevClose = closes.length >= 2 ? closes[closes.length - 2]! : price;
       const changePercent = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0;
-      const volume   = Math.round(Number(m["regularMarketVolume"] ?? 0));
-      // Compute avgVolume from the last 30 days of historical volume
-      const volumes  = r.indicators?.quote?.[0]?.volume?.filter((v): v is number => v != null) ?? [];
       const avgVolume = volumes.length > 0
         ? Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length)
         : volume;
