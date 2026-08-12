@@ -1094,6 +1094,30 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
       `explanation must name the put side as the failing leg (got: "${result.explanation}")`
     );
   });
+
+  it("fails with 'No calendar data' when both shortCallStrike and shortPutStrike are null but peaks are both +$5.00", () => {
+    // Both strike fields are absent, confirming the strike-null guard cannot be
+    // bypassed by the presence of large positive peak values.
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({
+        shortCallStrike: null,
+        shortPutStrike: null,
+        callCalendarPeak: 5.00,
+        putCalendarPeak: 5.00,
+      }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "shortCallStrike=null and shortPutStrike=null must cause rejection even when both peaks are +$5.00"
+    );
+    assert.equal(
+      result.calculatedValue,
+      "No calendar data",
+      `calculatedValue must be 'No calendar data' when both strike fields are null (got: "${result.calculatedValue}")`
+    );
+  });
 });
 
 // ===========================================================================
