@@ -1782,12 +1782,941 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
   }
 }
 
+// ===========================================================================
+// ThetaData Provider
+//
+// Uses ThetaData gRPC (mdds-01.thetadata.us:443) for options data and
+// Yahoo Finance for stock price / volume / market cap (the account has
+// stockSubscription=0, so stock gRPC endpoints return permission errors).
+//
+// Set MARKET_DATA_PROVIDER=thetadata to activate.
+// Set THETADATA_API_KEY to your "td1_..." API key (Replit Secret).
+// Optionally set UNIVERSE_CACHE_TTL_SECONDS (default 300).
+//
+// Limitations compared to the Polygon provider:
+//   - nextEarningsDate: always null  (ThetaData has no earnings-date endpoint)
+//   - earningsIvHistory: always null (requires historical stock price data)
+//   Filters 2 and 4 will therefore not qualify any stock in thetadata mode.
+// ===========================================================================
+
+// ---- Small concurrent-call limiter (prevents overwhelming the gRPC server) ----
+
+class ThetaSemaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+  constructor(limit: number) { this.available = limit; }
+  acquire(): Promise<void> {
+    if (this.available > 0) { this.available--; return Promise.resolve(); }
+    return new Promise<void>(res => this.waiters.push(res));
+  }
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) next(); else this.available++;
+  }
+}
+
+// ---- Protobuf encode helpers ----
+// Field numbers come from decoding the ThetaData Python SDK's serialized
+// FileDescriptorProto blobs (endpoints_pb2.py and v3grpc/endpoints_pb2.py).
+
+/** Scale factors indexed by the `type` field of ThetaData's Price message. */
+const TD_PRICE_FACTORS: readonly number[] = [
+  0, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1,
+  1, 10, 100, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
+];
+
+function pbVarint(n: number): number[] {
+  // Encode a non-negative integer as a protobuf varint.
+  const out: number[] = [];
+  while (n > 127) { out.push((n & 0x7f) | 0x80); n = Math.floor(n / 128); }
+  out.push(n & 0xff);
+  return out;
+}
+function pbTag(f: number, w: number): number[] { return pbVarint((f << 3) | w); }
+function pbLen(f: number, data: number[]): number[] {
+  return [...pbTag(f, 2), ...pbVarint(data.length), ...data];
+}
+function pbStr(f: number, s: string): number[] {
+  const b = Array.from(new TextEncoder().encode(s));
+  return [...pbTag(f, 2), ...pbVarint(b.length), ...b];
+}
+function pbInt32(f: number, v: number): number[] {
+  // Positive int32; pbVarint handles small values correctly.
+  return [...pbTag(f, 0), ...pbVarint(v >>> 0)];
+}
+function pbMapEntry(f: number, key: string, val: string): number[] {
+  // Encode one map<string,string> entry as a length-delimited sub-message.
+  return pbLen(f, [...pbStr(1, key), ...pbStr(2, val)]);
+}
+
+// ---- Protobuf decode helpers ----
+
+/** Read a varint from `data` starting at `pos`; returns [value, newPos]. */
+function pbReadVarint(data: Buffer, pos: number): [number, number] {
+  let result = 0;
+  let mul = 1;
+  for (let i = 0; i < 10; i++) {
+    if (pos >= data.length) break;
+    const b = data[pos++]!;
+    result += (b & 0x7f) * mul;
+    mul *= 128;
+    if (!(b & 0x80)) break;
+  }
+  return [result, pos];
+}
+
+/**
+ * Parse a flat protobuf binary message into a field-number → values map.
+ * Wire type 0 → number; wire type 2 → Buffer.
+ * Repeated fields append to the same array.
+ */
+function pbReadFields(data: Buffer): Map<number, Array<Buffer | number>> {
+  const fields = new Map<number, Array<Buffer | number>>();
+  let pos = 0;
+  while (pos < data.length) {
+    let tag: number;
+    try { [tag, pos] = pbReadVarint(data, pos); } catch { break; }
+    const fn = tag >> 3;
+    const wt = tag & 7;
+    if (wt === 0) {
+      const [val, np] = pbReadVarint(data, pos); pos = np;
+      fields.set(fn, [...(fields.get(fn) ?? []), val]);
+    } else if (wt === 2) {
+      const [len, np] = pbReadVarint(data, pos); pos = np;
+      const slice = data.slice(pos, pos + len); pos += len;
+      fields.set(fn, [...(fields.get(fn) ?? []), slice]);
+    } else if (wt === 1) {
+      const slice = data.slice(pos, pos + 8); pos += 8;
+      fields.set(fn, [...(fields.get(fn) ?? []), slice]);
+    } else if (wt === 5) {
+      const slice = data.slice(pos, pos + 4); pos += 4;
+      fields.set(fn, [...(fields.get(fn) ?? []), slice]);
+    } else {
+      break; // Unknown wire type — stop parsing this message
+    }
+  }
+  return fields;
+}
+
+type TdValue = string | number | null;
+
+/**
+ * Decode a ThetaData DataValue message.
+ * Oneof fields: text(1), number(2), price(3), timestamp(4), null_value(5).
+ */
+function pbDecodeDataValue(buf: Buffer): TdValue {
+  const f = pbReadFields(buf);
+  // field 1 = text (string)
+  if (f.has(1)) return (f.get(1)![0] as Buffer).toString("utf8");
+  // field 2 = number (int64 varint)
+  if (f.has(2)) return f.get(2)![0] as number;
+  // field 3 = price { value:int32=1, type:int32=2 }
+  if (f.has(3)) {
+    const pf = pbReadFields(f.get(3)![0] as Buffer);
+    const rawVal = (pf.get(1)?.[0] as number) ?? 0;
+    const typ    = (pf.get(2)?.[0] as number) ?? 0;
+    if (typ === 0) return NaN;
+    // Convert unsigned uint32 decoded value → signed int32
+    const signedVal = rawVal > 2_147_483_647 ? rawVal - 4_294_967_296 : rawVal;
+    return signedVal * (TD_PRICE_FACTORS[typ] ?? 1);
+  }
+  // field 4 = timestamp { epoch_ms:uint64=1 }
+  if (f.has(4)) {
+    const tf = pbReadFields(f.get(4)![0] as Buffer);
+    return (tf.get(1)?.[0] as number) ?? 0;
+  }
+  return null;
+}
+
+/**
+ * Decode a ThetaData DataTable message into an array of row records.
+ * DataTable: headers(1 repeated string), data_table(2 repeated DataValueList).
+ * DataValueList: values(1 repeated DataValue).
+ */
+function pbDecodeDataTable(buf: Buffer): Array<Record<string, TdValue>> {
+  const f = pbReadFields(buf);
+  const headers: string[] = (f.get(1) ?? []).map(h =>
+    Buffer.isBuffer(h) ? h.toString("utf8") : String(h)
+  );
+  const rows: Array<Record<string, TdValue>> = [];
+  for (const rowBuf of (f.get(2) ?? []) as Buffer[]) {
+    const rowFields = pbReadFields(rowBuf);
+    const valueBufs = (rowFields.get(1) ?? []) as Buffer[];
+    const record: Record<string, TdValue> = {};
+    headers.forEach((h, i) => {
+      record[h] = valueBufs[i] ? pbDecodeDataValue(valueBufs[i]!) : null;
+    });
+    rows.push(record);
+  }
+  return rows;
+}
+
+// ---- ThetaData request encoders ----
+// All requests follow the BetaEndpoints schema decoded from the Python SDK.
+
+/**
+ * Encode a QueryInfo message (BetaEndpoints.QueryInfo).
+ *   auth_token=1  (AuthToken: session_uuid=1)
+ *   query_parameters=2  (map<string,string> encoded as repeated sub-message)
+ *   email_hint=6
+ */
+function tdQueryInfo(sessionId: string, email: string): number[] {
+  const authToken = pbLen(1, pbStr(1, sessionId));
+  const qParam    = pbMapEntry(2, "client", "node");
+  const emailHint = pbStr(6, email);
+  return [...authToken, ...qParam, ...emailHint];
+}
+
+/** Encode OptionListExpirationsRequest. Params: symbol=1 (repeated string). */
+function tdEncodeOptionListExpirationsReq(
+  sessionId: string, email: string, symbol: string
+): Buffer {
+  const params = pbStr(1, symbol);          // OptionListExpirationsRequestQuery.symbol
+  return Buffer.from([
+    ...pbLen(1, tdQueryInfo(sessionId, email)),
+    ...pbLen(2, params),
+  ]);
+}
+
+/**
+ * Encode an OptionSnapshotXxxRequest.
+ *
+ * All three variants (Quote, GreeksAll, OpenInterest) share the same outer
+ * shape: query_info=1, params=2.  The params differ only in which field
+ * carries `max_dte`:
+ *   Quote / OpenInterest : max_dte = field 3
+ *   GreeksAll            : max_dte = field 8
+ *
+ * ContractSpec (Endpoints package): symbol=1, expiration=2, strike=3, right=4.
+ * ContractSpec is embedded as params.contract_spec = field 1.
+ */
+function tdEncodeOptionSnapshotReq(
+  rpc: "Quote" | "GreeksAll" | "OpenInterest",
+  sessionId: string, email: string,
+  symbol: string, expiration: string, maxDte?: number
+): Buffer {
+  const contractSpec = [
+    ...pbStr(1, symbol),
+    ...pbStr(2, expiration),
+    ...pbStr(3, "*"),
+    ...pbStr(4, "both"),
+  ];
+  const cs = pbLen(1, contractSpec); // params.contract_spec
+
+  let params: number[] = [...cs];
+  if (maxDte !== undefined) {
+    params = rpc === "GreeksAll"
+      ? [...params, ...pbInt32(8, maxDte)]   // GreeksAllRequestQuery.max_dte = 8
+      : [...params, ...pbInt32(3, maxDte)];  // Quote/OI RequestQuery.max_dte = 3
+  }
+
+  return Buffer.from([
+    ...pbLen(1, tdQueryInfo(sessionId, email)),
+    ...pbLen(2, params),
+  ]);
+}
+
+// ---- Yahoo Finance stock quote fetcher ----
+// Used because the account has stockSubscription=0 (no stock data from ThetaData).
+
+interface YahooStockData {
+  price: number;
+  changePercent: number;
+  volume: number;
+  avgVolume: number;
+  marketCap: number;
+  name: string;
+}
+
+async function fetchYahooStockQuotes(
+  symbols: string[]
+): Promise<Map<string, YahooStockData>> {
+  const result = new Map<string, YahooStockData>();
+  const BATCH = 25; // Yahoo allows many symbols per call; stay conservative
+  for (let i = 0; i < symbols.length; i += BATCH) {
+    const batch = symbols.slice(i, i + BATCH).join(",");
+    try {
+      const url =
+        `https://query1.finance.yahoo.com/v7/finance/quote` +
+        `?symbols=${encodeURIComponent(batch)}&lang=en-US&region=US`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as {
+        quoteResponse?: { result?: Array<Record<string, unknown>> };
+      };
+      for (const q of data.quoteResponse?.result ?? []) {
+        const sym = String(q["symbol"] ?? "");
+        if (!sym) continue;
+        result.set(sym, {
+          price:         Number(q["regularMarketPrice"] ?? 0),
+          changePercent: Number(q["regularMarketChangePercent"] ?? 0),
+          volume:        Math.round(Number(q["regularMarketVolume"] ?? 0)),
+          avgVolume:     Math.round(Number(q["averageDailyVolume3Month"] ?? q["averageDailyVolume10Day"] ?? 0)),
+          marketCap:     Number(q["marketCap"] ?? 0),
+          name:          String(q["shortName"] ?? q["longName"] ?? sym),
+        });
+      }
+    } catch {
+      // Batch failed — symbols in this batch will appear with zero price
+    }
+  }
+  return result;
+}
+
+// ---- Helper: extract a number or string from a TdValue row ----
+
+function tdGetNum(row: Record<string, TdValue>, ...keys: string[]): number {
+  for (const k of keys) {
+    const v = row[k];
+    if (typeof v === "number" && isFinite(v) && v !== 0) return v;
+  }
+  return 0;
+}
+
+function tdGetStr(row: Record<string, TdValue>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k];
+    if (typeof v === "string" && v !== "") return v;
+  }
+  return "";
+}
+
+// ---- ThetaDataProvider class ----
+
+export class ThetaDataProvider implements IMarketDataProvider {
+  readonly providerName = "ThetaDataProvider (ThetaData gRPC + Yahoo Finance)";
+
+  private sessionId  = "";
+  private email      = "";
+  private grpcClient: import("@grpc/grpc-js").Client | null = null;
+
+  private readonly cacheTtlMs: number;
+  private universeCache: UniverseCache | null = null;
+  private universeRefreshFailed = false;
+  private universeRefreshing: Promise<void> | null = null;
+
+  /** Limit concurrent gRPC streaming calls to avoid overwhelming the server. */
+  private readonly sem = new ThetaSemaphore(5);
+
+  private initDone  = false;
+  private initError: Error | null = null;
+  private readonly initPromise: Promise<void>;
+
+  constructor(private readonly apiKey: string, cacheTtlSeconds = 300) {
+    this.cacheTtlMs = cacheTtlSeconds * 1000;
+    this.initPromise = this.doInit();
+    // Pre-warm universe in the background after auth succeeds.
+    this.initPromise
+      .then(() => this.refreshUniverseCache())
+      .catch(() => {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Initialisation: authenticate + open gRPC channel
+  // -------------------------------------------------------------------------
+
+  private async doInit(): Promise<void> {
+    try {
+      // 1. Authenticate with ThetaData nexus API
+      const res = await fetch(
+        "https://nexus-api.thetadata.us/identity/terminal/auth_user",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "TD-TERMINAL-KEY": "cf58ada4-4175-11f0-860f-1e2e95c79e64",
+          },
+          body: JSON.stringify({
+            apiKey: this.apiKey,
+            authEnv: { envType: "PROD" },
+          }),
+          signal: AbortSignal.timeout(15_000),
+        }
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`ThetaData auth failed (${res.status}): ${text}`);
+      }
+      const json = await res.json() as {
+        sessionId: string;
+        user?: { email?: string };
+      };
+      this.sessionId = json.sessionId;
+      this.email     = json.user?.email ?? "";
+
+      // 2. Open a TLS gRPC channel to the market-data server
+      const grpc = await import("@grpc/grpc-js");
+      this.grpcClient = new grpc.Client(
+        "mdds-01.thetadata.us:443",
+        grpc.credentials.createSsl()
+      );
+      this.initDone = true;
+    } catch (err) {
+      this.initError = err instanceof Error ? err : new Error(String(err));
+      throw this.initError;
+    }
+  }
+
+  private async ensureReady(): Promise<void> {
+    await this.initPromise;
+    if (!this.initDone) {
+      throw this.initError ?? new Error("ThetaData provider not initialised");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Low-level gRPC + response decoding
+  // -------------------------------------------------------------------------
+
+  /**
+   * Make a server-streaming gRPC call and return all ResponseData frames
+   * as raw Buffers.  Returns [] on NOT_FOUND (no data for the request).
+   * Acquires / releases the semaphore around each call.
+   */
+  private async callGrpcStream(method: string, reqBuf: Buffer): Promise<Buffer[]> {
+    await this.ensureReady();
+    await this.sem.acquire();
+    try {
+      const grpc = await import("@grpc/grpc-js");
+      const call = (this.grpcClient as import("@grpc/grpc-js").Client)
+        .makeServerStreamRequest(
+          method,
+          (v: Buffer) => v,  // already serialised
+          (v: Buffer) => v,  // keep raw bytes for manual decode
+          reqBuf
+        );
+      return await new Promise<Buffer[]>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        call.on("data",  (chunk: Buffer) => chunks.push(chunk));
+        call.on("end",   () => resolve(chunks));
+        call.on("error", (err: NodeJS.ErrnoException) => {
+          // code 5 = NOT_FOUND — treat as empty result, not an error
+          if ((err as Record<string, unknown>)["code"] === 5) resolve([]);
+          else reject(err);
+        });
+      });
+    } finally {
+      this.sem.release();
+    }
+  }
+
+  /**
+   * Decode a stream of raw ResponseData frames into row records.
+   * Each frame may be ZSTD-compressed (algo=1) or uncompressed (algo=0).
+   * Decompressed bytes are parsed as a DataTable.
+   */
+  private async decodeStream(
+    chunks: Buffer[]
+  ): Promise<Array<Record<string, TdValue>>> {
+    if (chunks.length === 0) return [];
+    const { decompress } = await import("fzstd");
+    const rows: Array<Record<string, TdValue>> = [];
+
+    for (const chunk of chunks) {
+      // ResponseData: compressed_data=1, compression_description=2
+      const rf = pbReadFields(chunk);
+      const compressedData = rf.get(1)?.[0] as Buffer | undefined;
+      if (!compressedData || compressedData.length === 0) continue;
+
+      // CompressionDescription: algo=1 (0=NONE, 1=ZSTD)
+      const comprBuf = rf.get(2)?.[0] as Buffer | undefined;
+      let algo = 0;
+      if (comprBuf) {
+        const cf = pbReadFields(comprBuf);
+        algo = (cf.get(1)?.[0] as number) ?? 0;
+      }
+
+      let tableBuffer: Buffer;
+      if (algo === 1 /* ZSTD */) {
+        const decompressed = decompress(new Uint8Array(compressedData));
+        tableBuffer = Buffer.from(decompressed);
+      } else {
+        tableBuffer = compressedData;
+      }
+      rows.push(...pbDecodeDataTable(tableBuffer));
+    }
+    return rows;
+  }
+
+  // -------------------------------------------------------------------------
+  // ThetaData gRPC calls
+  // -------------------------------------------------------------------------
+
+  /** Fetch all available expirations for a symbol. */
+  private async getOptionExpirations(symbol: string): Promise<string[]> {
+    const req    = tdEncodeOptionListExpirationsReq(this.sessionId, this.email, symbol);
+    const chunks = await this.callGrpcStream(
+      "/BetaEndpoints.BetaThetaTerminal/GetOptionListExpirations",
+      req
+    );
+    const rows = await this.decodeStream(chunks);
+    const dates: string[] = [];
+    for (const row of rows) {
+      // The response typically has one column; try common names first
+      const val =
+        row["Expiration"] ?? row["expiration"] ??
+        Object.values(row).find(v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v as string));
+      if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+        dates.push(val);
+      }
+    }
+    return dates.sort();
+  }
+
+  /**
+   * Fetch an options snapshot (Quote, GreeksAll, or OpenInterest).
+   * Pass `expiration="*"` to get all expirations; use `maxDte` to limit.
+   */
+  private async getOptionSnapshot(
+    rpc: "Quote" | "GreeksAll" | "OpenInterest",
+    symbol: string,
+    expiration: string,
+    maxDte?: number
+  ): Promise<Array<Record<string, TdValue>>> {
+    const grpcMethod: Record<string, string> = {
+      Quote:        "/BetaEndpoints.BetaThetaTerminal/GetOptionSnapshotQuote",
+      GreeksAll:    "/BetaEndpoints.BetaThetaTerminal/GetOptionSnapshotGreeksAll",
+      OpenInterest: "/BetaEndpoints.BetaThetaTerminal/GetOptionSnapshotOpenInterest",
+    };
+    const req    = tdEncodeOptionSnapshotReq(rpc, this.sessionId, this.email, symbol, expiration, maxDte);
+    const chunks = await this.callGrpcStream(grpcMethod[rpc]!, req);
+    return this.decodeStream(chunks);
+  }
+
+  // -------------------------------------------------------------------------
+  // Liquidity-metrics computation (same algorithm as LiveMarketDataProvider)
+  // -------------------------------------------------------------------------
+
+  private buildLiquidityMetrics(
+    quoteRows : Array<Record<string, TdValue>>,
+    greekRows : Array<Record<string, TdValue>>,
+    todayMs   : number
+  ): {
+    optionsVolume    : number;
+    openInterest     : number;
+    impliedVolatility: number;
+    liquidityMetrics : OptionsLiquidityMetrics;
+  } | null {
+    if (quoteRows.length === 0) return null;
+
+    // ---- Collect unique expirations from quote rows ----
+    const dteFn = (exp: string) => {
+      const ms = new Date(exp + "T00:00:00Z").getTime() - todayMs;
+      return Math.round(ms / 86_400_000);
+    };
+
+    const expSet = new Set<string>();
+    for (const row of quoteRows) {
+      const e = tdGetStr(row, "Expiration", "expiration");
+      if (/^\d{4}-\d{2}-\d{2}$/.test(e) && dteFn(e) >= 0) expSet.add(e);
+    }
+    const expirations = [...expSet].sort();
+    if (expirations.length === 0) return null;
+
+    const sortedExps = expirations.filter(e => dteFn(e) >= 3);
+    const nearExp    = sortedExps.find(e => dteFn(e) >= 7) ?? sortedExps[0];
+    const longExp    = sortedExps.find(e => dteFn(e) >= 14 && e !== nearExp)
+                       ?? sortedExps.find(e => e !== nearExp);
+    if (!nearExp) return null;
+
+    const nearDte = dteFn(nearExp);
+
+    // ---- Build quote map for near-term expiration ----
+    interface QSlot { bid: number; ask: number; bidSz: number; askSz: number }
+    const quoteMap = new Map<string, QSlot>();
+    let totalVol = 0;
+    let totalOI  = 0;
+
+    for (const row of quoteRows) {
+      const exp    = tdGetStr(row, "Expiration", "expiration");
+      if (exp !== nearExp) continue;
+      const strike = tdGetNum(row, "Strike", "strike");
+      const right  = tdGetStr(row, "Right",  "right", "CallPut", "call_put").toUpperCase();
+      if (!strike || (right !== "C" && right !== "P")) continue;
+
+      const key  = `${strike}:${right}`;
+      const bid  = tdGetNum(row, "Bid",     "bid",      "BidPrice", "bid_price");
+      const ask  = tdGetNum(row, "Ask",     "ask",      "AskPrice", "ask_price");
+      const bidSz = tdGetNum(row, "BidSize", "bid_size", "BidSz");
+      const askSz = tdGetNum(row, "AskSize", "ask_size", "AskSz");
+
+      quoteMap.set(key, { bid, ask, bidSz, askSz });
+      totalVol += bidSz;
+      totalOI  += bidSz + askSz;
+    }
+
+    // ---- Build greek map for near-term and long-term expirations ----
+    interface GSlot { iv: number }
+    const greekMapNear = new Map<string, GSlot>();
+    const greekMapLong = new Map<string, GSlot>();
+
+    for (const row of greekRows) {
+      const exp    = tdGetStr(row, "Expiration", "expiration");
+      const strike = tdGetNum(row, "Strike", "strike");
+      const right  = tdGetStr(row, "Right",  "right", "CallPut", "call_put").toUpperCase();
+      if (!strike || (right !== "C" && right !== "P")) continue;
+      const key = `${strike}:${right}`;
+      const iv  = tdGetNum(row, "MidIV", "mid_iv", "IV", "iv", "ImpliedVolatility", "implied_volatility");
+      if (iv <= 0) continue;
+
+      if (exp === nearExp) greekMapNear.set(key, { iv });
+      if (longExp && exp === longExp) greekMapLong.set(key, { iv });
+    }
+
+    // ---- Aggregate implied volatility ----
+    const ivValues: number[] = [];
+    for (const [, g] of greekMapNear) if (g.iv > 0) ivValues.push(g.iv);
+    const aggIv = ivValues.length > 0 ? median(ivValues) : 0;
+
+    // ---- hasWeeklyOptions ----
+    const hasWeeklyOptions = expirations.some(e => !isThirdFriday(e));
+
+    // ---- Near-term spread + penny increments + nearTermIv ----
+    let hasPennyIncrements = false;
+    const spreads: number[] = [];
+    const nearIvValues: number[] = [];
+
+    for (const [key, q] of quoteMap) {
+      const mid = (q.bid + q.ask) / 2;
+      if (mid >= 0.2 && mid <= 0.7) {
+        if (isPennyIncrement(q.bid) || isPennyIncrement(q.ask)) hasPennyIncrements = true;
+        spreads.push(q.ask - q.bid);
+      }
+      const g = greekMapNear.get(key);
+      if (g && g.iv > 0) nearIvValues.push(g.iv);
+    }
+
+    const nearTermSpread: number | null =
+      spreads.length > 0
+        ? parseFloat((spreads.reduce((a, b) => a + b, 0) / spreads.length).toFixed(4))
+        : null;
+    const nearTermIv: number | null =
+      nearIvValues.length > 0 ? parseFloat(median(nearIvValues).toFixed(4)) : null;
+
+    // ---- Calendar spread: find short call/put + compute peaks ----
+    let shortCallStrike : number | null = null;
+    let shortPutStrike  : number | null = null;
+    let callCalendarPeak: number | null = null;
+    let putCalendarPeak : number | null = null;
+
+    const in30to60 = (q: QSlot) => { const m = (q.bid + q.ask) / 2; return m >= 0.30 && m <= 0.60; };
+    const callCands: Array<{ strike: number; q: QSlot }> = [];
+    const putCands : Array<{ strike: number; q: QSlot }> = [];
+
+    for (const [key, q] of quoteMap) {
+      if (!in30to60(q)) continue;
+      const [strikeStr, right] = key.split(":");
+      const strike = Number(strikeStr);
+      if (right === "C") callCands.push({ strike, q });
+      if (right === "P") putCands.push({ strike, q });
+    }
+    callCands.sort((a, b) => b.strike - a.strike); // highest OTM call first
+    putCands.sort( (a, b) => a.strike - b.strike); // lowest  OTM put  first
+
+    const bestCall = callCands[0];
+    const bestPut  = putCands[0];
+
+    if (bestCall && bestPut && longExp) {
+      const longCallG = greekMapLong.get(`${bestCall.strike}:C`);
+      const longPutG  = greekMapLong.get(`${bestPut.strike}:P`);
+
+      // We need mid prices for both the near-term short legs (from quoteMap)
+      // and the longer-term long legs. For the long legs we fetch their
+      // quote prices from greekRows if available, otherwise estimate via B-S.
+      if (longCallG && longPutG && longCallG.iv > 0 && longPutG.iv > 0) {
+        shortCallStrike = bestCall.strike;
+        shortPutStrike  = bestPut.strike;
+
+        const shortCallMid = (bestCall.q.bid + bestCall.q.ask) / 2;
+        const shortPutMid  = (bestPut.q.bid  + bestPut.q.ask)  / 2;
+
+        // Find long-leg quote prices from the full greekRows set (which covers wider DTE)
+        const longCallRow = greekRows.find(r => {
+          const exp = tdGetStr(r, "Expiration", "expiration");
+          const st  = tdGetNum(r, "Strike", "strike");
+          const rt  = tdGetStr(r, "Right", "right", "CallPut", "call_put").toUpperCase();
+          return exp === longExp && st === bestCall.strike && rt === "C";
+        });
+        const longPutRow = greekRows.find(r => {
+          const exp = tdGetStr(r, "Expiration", "expiration");
+          const st  = tdGetNum(r, "Strike", "strike");
+          const rt  = tdGetStr(r, "Right", "right", "CallPut", "call_put").toUpperCase();
+          return exp === longExp && st === bestPut.strike && rt === "P";
+        });
+
+        const longDte    = dteFn(longExp);
+        const remainDays = Math.max(longDte - nearDte, 1);
+        const remainT    = remainDays / 365;
+
+        // Use ATM B-S approximation for long-leg midpoint if no quote data
+        const longCallMid = longCallRow
+          ? tdGetNum(longCallRow, "Bid", "bid") > 0 || tdGetNum(longCallRow, "Ask", "ask") > 0
+              ? (tdGetNum(longCallRow, "Bid", "bid") + tdGetNum(longCallRow, "Ask", "ask")) / 2
+              : bsAtmValue(bestCall.strike, longCallG.iv, remainT)
+          : bsAtmValue(bestCall.strike, longCallG.iv, remainT);
+        const longPutMid = longPutRow
+          ? tdGetNum(longPutRow, "Bid", "bid") > 0 || tdGetNum(longPutRow, "Ask", "ask") > 0
+              ? (tdGetNum(longPutRow, "Bid", "bid") + tdGetNum(longPutRow, "Ask", "ask")) / 2
+              : bsAtmValue(bestPut.strike, longPutG.iv, remainT)
+          : bsAtmValue(bestPut.strike, longPutG.iv, remainT);
+
+        const callDebit  = longCallMid - shortCallMid;
+        const putDebit   = longPutMid  - shortPutMid;
+        const totalDebit = callDebit + putDebit;
+
+        callCalendarPeak = parseFloat((bsAtmValue(bestCall.strike, longCallG.iv, remainT) - totalDebit).toFixed(2));
+        putCalendarPeak  = parseFloat((bsAtmValue(bestPut.strike,  longPutG.iv,  remainT) - totalDebit).toFixed(2));
+      }
+    }
+
+    return {
+      optionsVolume:     totalVol,
+      openInterest:      totalOI,
+      impliedVolatility: parseFloat(aggIv.toFixed(4)),
+      liquidityMetrics: {
+        hasWeeklyOptions,
+        hasPennyIncrements,
+        nearTermSpread,
+        nearTermDte: nearDte,
+        nearTermIv,
+        shortCallStrike,
+        shortPutStrike,
+        callCalendarPeak,
+        putCalendarPeak,
+      },
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Per-ticker enrichment
+  // -------------------------------------------------------------------------
+
+  private async enrichTicker(
+    symbol   : string,
+    yahooData: Map<string, YahooStockData>,
+    todayMs  : number
+  ): Promise<StockQuote | null> {
+    try {
+      const yq = yahooData.get(symbol);
+
+      // Fetch quote data (≤20 DTE) and greek data (≤35 DTE) in parallel.
+      // Using expiration="*" with max_dte lets ThetaData return all expirations
+      // in one shot, eliminating the separate GetOptionListExpirations call.
+      const [quoteRows, greekRows] = await Promise.all([
+        this.getOptionSnapshot("Quote",     symbol, "*", 20),
+        this.getOptionSnapshot("GreeksAll", symbol, "*", 35),
+      ]);
+
+      if (quoteRows.length === 0 && greekRows.length === 0) return null;
+
+      const metrics = this.buildLiquidityMetrics(quoteRows, greekRows, todayMs);
+
+      return {
+        symbol,
+        company:             TICKER_NAMES[symbol] ?? symbol,
+        price:               parseFloat((yq?.price ?? 0).toFixed(2)),
+        dailyChangePercent:  parseFloat((yq?.changePercent ?? 0).toFixed(2)),
+        volume:              yq?.volume   ?? 0,
+        avgVolume:           yq?.avgVolume ?? 0,
+        marketCap:           yq?.marketCap ?? 0,
+        impliedVolatility:   metrics?.impliedVolatility ?? 0,
+        optionsVolume:       metrics?.optionsVolume     ?? 0,
+        openInterest:        metrics?.openInterest      ?? 0,
+        sector:              TICKER_SECTORS[symbol] ?? "other",
+        nextEarningsDate:    null, // not available from ThetaData on this plan
+        liquidityMetrics:    metrics?.liquidityMetrics ?? null,
+        earningsIvHistory:   null, // requires historical stock price data
+      };
+    } catch {
+      // Drop this ticker on error rather than zero-filling
+      return null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Universe cache (stale-while-revalidate, same pattern as Polygon provider)
+  // -------------------------------------------------------------------------
+
+  private async fetchUniverseFromThetaData(): Promise<StockQuote[]> {
+    const todayMs = Date.now();
+
+    // Batch-fetch all stock quotes from Yahoo Finance in one HTTP call
+    const yahooData = await fetchYahooStockQuotes(LIVE_STOCK_UNIVERSE);
+
+    // Enrich each ticker concurrently (semaphore limits gRPC concurrency)
+    const results = await Promise.all(
+      LIVE_STOCK_UNIVERSE.map(sym => this.enrichTicker(sym, yahooData, todayMs))
+    );
+
+    return results.filter((q): q is StockQuote => q !== null);
+  }
+
+  private refreshUniverseCache(): Promise<void> {
+    if (this.universeRefreshing) return this.universeRefreshing;
+
+    this.universeRefreshing = this.fetchUniverseFromThetaData()
+      .then((data) => {
+        this.universeCache        = { data, fetchedAt: Date.now() };
+        this.universeRefreshFailed = false;
+      })
+      .catch((err: unknown) => {
+        this.universeRefreshFailed = true;
+        if (!this.universeCache) throw err; // cold-start failure → propagate
+      })
+      .finally(() => { this.universeRefreshing = null; });
+
+    return this.universeRefreshing;
+  }
+
+  // -------------------------------------------------------------------------
+  // IMarketDataProvider implementation
+  // -------------------------------------------------------------------------
+
+  async getStockUniverse(): Promise<StockUniverseResult> {
+    const now     = Date.now();
+    const isStale = !this.universeCache || now - this.universeCache.fetchedAt > this.cacheTtlMs;
+
+    if (!this.universeCache) {
+      await this.refreshUniverseCache(); // cold start — must wait
+    } else if (isStale) {
+      this.refreshUniverseCache().catch(() => {}); // serve stale; refresh async
+    }
+
+    if (!this.universeCache) {
+      throw new Error("ThetaData universe fetch failed and no cached data is available");
+    }
+
+    return {
+      stocks: this.universeCache.data,
+      dataFreshness: {
+        timestamp: new Date(this.universeCache.fetchedAt).toISOString(),
+        source: this.universeRefreshFailed ? "cached" : "live",
+      },
+    };
+  }
+
+  async getStockQuote(symbol: string): Promise<StockQuote | null> {
+    const yahooData = await fetchYahooStockQuotes([symbol]);
+    return this.enrichTicker(symbol, yahooData, Date.now());
+  }
+
+  async getOptionsChain(symbol: string): Promise<OptionsChain | null> {
+    try {
+      const expirations = await this.getOptionExpirations(symbol);
+      if (expirations.length === 0) return null;
+
+      // Fetch quote rows for the first 4 expirations
+      const relevantExps = expirations.slice(0, 4);
+      const contractMap  = new Map<
+        string,
+        { call?: Record<string, TdValue>; put?: Record<string, TdValue> }
+      >();
+
+      for (const exp of relevantExps) {
+        const rows = await this.getOptionSnapshot("Quote", symbol, exp);
+        for (const row of rows) {
+          const strike = tdGetNum(row, "Strike", "strike");
+          const right  = tdGetStr(row, "Right",  "right", "CallPut", "call_put").toLowerCase();
+          if (!strike || (right !== "c" && right !== "p")) continue;
+          const key   = `${exp}:${strike}`;
+          const entry = contractMap.get(key) ?? {};
+          if (right === "c") entry.call = row; else entry.put = row;
+          contractMap.set(key, entry);
+        }
+      }
+
+      const expSet:    Set<string>         = new Set();
+      const contracts: OptionsContract[]   = [];
+
+      for (const [key, sides] of contractMap) {
+        const colonIdx = key.indexOf(":");
+        const exp      = key.slice(0, colonIdx);
+        const strike   = parseFloat(key.slice(colonIdx + 1));
+        if (!exp || !strike) continue;
+        expSet.add(exp);
+
+        const call = sides.call ?? {};
+        const put  = sides.put  ?? {};
+        contracts.push({
+          strike,
+          expiration: exp,
+          callBid:   tdGetNum(call, "Bid", "bid"),
+          callAsk:   tdGetNum(call, "Ask", "ask"),
+          callVolume: 0, callOI: 0,
+          callIV:    tdGetNum(call, "MidIV", "mid_iv", "IV", "iv"),
+          callDelta: 0, callGamma: 0, callTheta: 0, callVega: 0,
+          putBid:    tdGetNum(put,  "Bid", "bid"),
+          putAsk:    tdGetNum(put,  "Ask", "ask"),
+          putVolume: 0, putOI: 0,
+          putIV:     tdGetNum(put,  "MidIV", "mid_iv", "IV", "iv"),
+          putDelta: 0, putGamma: 0, putTheta: 0, putVega: 0,
+        });
+      }
+
+      contracts.sort((a, b) => {
+        const cmp = a.expiration.localeCompare(b.expiration);
+        return cmp !== 0 ? cmp : a.strike - b.strike;
+      });
+
+      return { symbol, expirations: [...expSet].sort(), contracts };
+    } catch {
+      return null;
+    }
+  }
+
+  async getMarketStatus(): Promise<MarketStatusData> {
+    // ThetaData has no market-status endpoint; derive from wall-clock ET.
+    const now  = new Date();
+    const etMs = now.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour12: false });
+    const [hStr, mStr] = etMs.split(":");
+    const etTotal = parseInt(hStr ?? "0") * 60 + parseInt(mStr ?? "0");
+    const etDate  = new Date(now.toLocaleDateString("en-US", { timeZone: "America/New_York" }));
+    const dow     = etDate.getDay(); // 0=Sun, 6=Sat
+
+    let state: MarketStatusData["state"];
+    let label: string;
+    let description: string;
+
+    if (dow === 0 || dow === 6) {
+      state = "closed"; label = "CLOSED"; description = "Market closed (weekend)";
+    } else if (etTotal >= 9 * 60 + 30 && etTotal < 16 * 60) {
+      state = "open";       label = "OPEN";       description = "Regular trading session (9:30 AM – 4:00 PM ET)";
+    } else if (etTotal >= 4 * 60 && etTotal < 9 * 60 + 30) {
+      state = "pre_market"; label = "PRE-MARKET"; description = "Pre-market trading (4:00 AM – 9:30 AM ET)";
+    } else if (etTotal >= 16 * 60 && etTotal < 20 * 60) {
+      state = "after_hours"; label = "AFTER-HOURS"; description = "After-hours trading (4:00 PM – 8:00 PM ET)";
+    } else {
+      state = "closed"; label = "CLOSED"; description = "Market closed";
+    }
+
+    return { state, label, description, timestamp: now, nextOpen: null, nextClose: null };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Factory — reads env vars and returns the correct provider
 // ---------------------------------------------------------------------------
 
 export function createMarketDataProvider(): IMarketDataProvider {
   const mode = process.env.MARKET_DATA_PROVIDER ?? "mock";
+
+  if (mode === "thetadata") {
+    const apiKey = process.env.THETADATA_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "MARKET_DATA_PROVIDER=thetadata but THETADATA_API_KEY is not set. " +
+          "Add your ThetaData API key to Replit Secrets."
+      );
+    }
+    const cacheTtl = parseInt(process.env.UNIVERSE_CACHE_TTL_SECONDS ?? "300", 10);
+    return new ThetaDataProvider(
+      apiKey,
+      isFinite(cacheTtl) && cacheTtl > 0 ? cacheTtl : 300
+    );
+  }
 
   if (mode === "live") {
     const apiKey = process.env.MARKET_DATA_API_KEY;
