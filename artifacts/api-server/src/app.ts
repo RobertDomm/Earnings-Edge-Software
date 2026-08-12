@@ -97,8 +97,17 @@ app.use(
       // server begins accepting traffic, so lazy creation is not needed and is
       // disabled to prevent concurrent cold-start races.
       createTableIfMissing: false,
-      // Prune expired sessions every hour.
-      pruneSessionInterval: 60 * 60,
+      // Prune expired sessions every 15 minutes.
+      //
+      // Table-growth expectation: with maxAge=24h and pruning every 15 min,
+      // the "session" table will hold at most ~96 pruning windows worth of
+      // concurrent live sessions. Under typical load (a few hundred active
+      // users) this stays well under a few thousand rows. The IDX_session_expire
+      // index (created in runStartupMigrations) makes both the DELETE prune
+      // query and session lookups O(log n) so the table never becomes a hotspot.
+      // If load grows significantly, reduce this interval further or add
+      // pg_cron to schedule pruning independently of process uptime.
+      pruneSessionInterval: 15 * 60,
     }),
     secret: sessionSecret,
     name: "screener.sid",
