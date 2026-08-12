@@ -984,6 +984,38 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
       `calculatedValue must be 'No calendar data' when putCalendarPeak is null (got: "${result.calculatedValue}")`
     );
   });
+
+  it("fails when callCalendarPeak=$0.00 and putCalendarPeak=$5.00 — call side alone drives the rejection", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0.00, putCalendarPeak: 5.00 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "callCalendarPeak=$0.00 must cause rejection regardless of a large putCalendarPeak ($5.00)"
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("call"),
+      `explanation must name the call side as the failing leg (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when callCalendarPeak=$5.00 and putCalendarPeak=$0.00 — put side alone drives the rejection", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 5.00, putCalendarPeak: 0.00 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "putCalendarPeak=$0.00 must cause rejection regardless of a large callCalendarPeak ($5.00)"
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("put"),
+      `explanation must name the put side as the failing leg (got: "${result.explanation}")`
+    );
+  });
 });
 
 // ===========================================================================
