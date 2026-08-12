@@ -19,11 +19,43 @@ import { useLocation } from "wouter";
 // Default polling interval — configurable per-session via the UI dropdown
 const DEFAULT_INTERVAL: AutoRefreshIntervalOption = 30;
 
+const STORAGE_KEY = "screener:auto-refresh-interval";
+const VALID_INTERVALS = new Set<number>([0, 15, 30, 60, 300]);
+
+function readStoredInterval(): AutoRefreshIntervalOption {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return DEFAULT_INTERVAL;
+    const parsed = Number(raw);
+    return VALID_INTERVALS.has(parsed)
+      ? (parsed as AutoRefreshIntervalOption)
+      : DEFAULT_INTERVAL;
+  } catch {
+    // localStorage unavailable (e.g. private-browsing restrictions)
+    return DEFAULT_INTERVAL;
+  }
+}
+
+function writeStoredInterval(value: AutoRefreshIntervalOption): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, String(value));
+  } catch {
+    // Silently ignore write failures
+  }
+}
+
 export default function Dashboard() {
   const { auth } = useRequireAuth();
   const [_, setLocation] = useLocation();
+  // Lazy initializer reads from localStorage; falls back to DEFAULT_INTERVAL
+  // when no value is stored or the stored value is not a valid option.
   const [intervalSeconds, setIntervalSeconds] =
-    useState<AutoRefreshIntervalOption>(DEFAULT_INTERVAL);
+    useState<AutoRefreshIntervalOption>(readStoredInterval);
+
+  const handleIntervalChange = (next: AutoRefreshIntervalOption) => {
+    writeStoredInterval(next);
+    setIntervalSeconds(next);
+  };
 
   const { data: marketStatus } = useGetMarketStatus({
     query: {
@@ -106,7 +138,7 @@ export default function Dashboard() {
             <ScannerStatusWidget
               autoScanner={autoScanner}
               intervalSeconds={intervalSeconds}
-              onIntervalChange={setIntervalSeconds}
+              onIntervalChange={handleIntervalChange}
             />
           </div>
         </div>
