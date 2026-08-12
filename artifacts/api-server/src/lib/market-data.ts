@@ -1152,9 +1152,44 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
    * because Polygon's standard aggregates endpoint does not expose historical
    * options IV. RV and IV are directionally correlated around earnings events.
    */
-  private async fetchEarningsIvHistory(ticker: string): Promise<EarningsIvRecord[] | null> {
+  /**
+   * Single /vX/reference/financials fetch that serves both earnings needs:
+   *  - nextEarningsDate: derived from the most-recent filing date + 91 days
+   *  - earningsIvHistory: realized-vol pattern over the last 4 quarterly cycles
+   *
+   * Fetching limit:"4" instead of two separate calls (limit:"1" + limit:"4")
+   * removes one Polygon API call per ticker — 60+ fewer calls per scan cycle.
+   *
+   * Returns null for earningsIvHistory when fewer than 4 cycles of usable
+   * price data exist.  Returns null for nextEarningsDate on any API error.
+   * Degrades gracefully on any failure.
+   */
+  /**
+   * Single /vX/reference/financials fetch that serves both earnings needs:
+   *  - nextEarningsDate: derived from the most-recent filing date + 91 days
+   *  - earningsIvHistory: realized-vol pattern over the last 4 quarterly cycles
+   *
+   * Fetching limit:"4" instead of two separate calls (limit:"1" + limit:"4")
+   * removes one Polygon API call per ticker — 60+ fewer calls per scan cycle.
+   *
+   * Fault isolation: the financials call and the subsequent aggregates call
+   * have separate error boundaries.  If the aggregates fetch fails (e.g.
+   * transient outage) nextEarningsDate is still returned from the already-
+   * succeeded financials result; only earningsIvHistory is nulled out.
+   *
+   * Returns null for earningsIvHistory when fewer than 4 cycles of usable
+   * price data exist.  Returns null for nextEarningsDate only when the
+   * financials call itself fails.
+   */
+  private async fetchEarningsData(ticker: string): Promise<{
+    nextEarningsDate: string | null;
+    earningsIvHistory: EarningsIvRecord[] | null;
+  }> {
+    // --- Step 1: financials (single call) ---
+    let filings: string[];
     try {
-      // Step 1: get last 4 quarterly filing dates (≈ earnings announcement dates)
+      // Single call: last 4 quarterly filings — most-recent entry → nextEarningsDate,
+      // all 4 entries → earningsIvHistory.
       const financials = await this.polygonFetch<{
         results?: Array<{ filing_date?: string; period_of_report_date?: string }>;
       }>("/vX/reference/financials", {
@@ -1165,13 +1200,31 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         order: "desc",
       });
 
-      const filings = (financials.results ?? [])
+      filings = (financials.results ?? [])
         .map((r) => r.filing_date ?? r.period_of_report_date)
         .filter((d): d is string => !!d);
+    } catch {
+      // Financials call failed — cannot derive either field.
+      return { nextEarningsDate: null, earningsIvHistory: null };
+    }
 
-      if (filings.length < 4) return null;
+    // Derive nextEarningsDate from the most recent filing (filings[0]).
+    // Prefer the actual filing date (closer to announcement) over period end date.
+    let nextEarningsDate: string | null = null;
+    if (filings.length > 0) {
+      const next = new Date(filings[0]! + "T00:00:00");
+      next.setDate(next.getDate() + 91); // one fiscal quarter forward
+      nextEarningsDate = next.toISOString().split("T")[0]!; // YYYY-MM-DD
+    }
 
-      // Step 2: single price-data fetch covering the full 220-day window
+    if (filings.length < 4) {
+      // Not enough history for IV pattern — nextEarningsDate still populated.
+      return { nextEarningsDate, earningsIvHistory: null };
+    }
+
+    // --- Step 2: price aggregates for IV history (separate error boundary) ---
+    // A failure here must not clear nextEarningsDate derived above.
+    try {
       const earliest = filings[filings.length - 1]!;
       const priceFrom = dateOffsetFrom(earliest, -50); // extra buffer for baseline
       const priceTo   = dateOffsetFrom(filings[0]!, -1);
@@ -1183,7 +1236,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
 
       const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
 
-      // Step 3: compute realized vol windows around each filing date
+      // Compute realized vol windows around each filing date.
       const records: EarningsIvRecord[] = [];
 
       for (const earningsDate of filings) {
@@ -1215,45 +1268,13 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         });
       }
 
-      return records.length >= 4 ? records : null;
+      return {
+        nextEarningsDate,
+        earningsIvHistory: records.length >= 4 ? records : null,
+      };
     } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Estimate the next earnings date for a ticker by fetching its most recent
-   * quarterly filing date from Polygon's financials endpoint and projecting
-   * forward ~91 days (one fiscal quarter).
-   *
-   * Returns null on any error so the caller can degrade gracefully — a null
-   * nextEarningsDate causes Filter 2 (upcoming earnings) to FAIL for that stock.
-   */
-  private async fetchNextEarningsDate(ticker: string): Promise<string | null> {
-    try {
-      const data = await this.polygonFetch<{
-        results?: Array<{ filing_date?: string; period_of_report_date?: string }>;
-      }>("/vX/reference/financials", {
-        ticker,
-        timeframe: "quarterly",
-        limit: "1",
-        sort: "period_of_report_date",
-        order: "desc",
-      });
-
-      const result = data.results?.[0];
-      if (!result) return null;
-
-      // Prefer the actual filing date (closer to earnings announcement)
-      // over the period end date (which is weeks earlier).
-      const baseDate = result.filing_date ?? result.period_of_report_date;
-      if (!baseDate) return null;
-
-      const next = new Date(baseDate + "T00:00:00");
-      next.setDate(next.getDate() + 91); // one fiscal quarter forward
-      return next.toISOString().split("T")[0]; // YYYY-MM-DD
-    } catch {
-      return null;
+      // Aggregates failed — IV history unavailable, but earnings date is preserved.
+      return { nextEarningsDate, earningsIvHistory: null };
     }
   }
 
@@ -1416,12 +1437,12 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             safeNum(snap.day?.c) ||
             safeNum(snap.prevDay?.c);
 
-          const [optStats, avgVol, nextEarningsDate, earningsIvHistory] = await Promise.all([
+          const [optStats, avgVol, earningsData] = await Promise.all([
             this.fetchOptionsStats(snap.ticker),
             this.fetchAvgVolume(snap.ticker),
-            this.fetchNextEarningsDate(snap.ticker),
-            this.fetchEarningsIvHistory(snap.ticker),
+            this.fetchEarningsData(snap.ticker),
           ]);
+          const { nextEarningsDate, earningsIvHistory } = earningsData;
 
           enriched.push({
             symbol: snap.ticker,
@@ -1455,15 +1476,15 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
 
   async getStockQuote(symbol: string): Promise<StockQuote | null> {
     try {
-      const [snapData, optStats, avgVol, nextEarningsDate, earningsIvHistory] = await Promise.all([
+      const [snapData, optStats, avgVol, earningsData] = await Promise.all([
         this.polygonFetch<{ ticker?: PolygonTickerSnapshot }>(
           `/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
         ),
         this.fetchOptionsStats(symbol),
         this.fetchAvgVolume(symbol),
-        this.fetchNextEarningsDate(symbol),
-        this.fetchEarningsIvHistory(symbol),
+        this.fetchEarningsData(symbol),
       ]);
+      const { nextEarningsDate, earningsIvHistory } = earningsData;
 
       const snap = snapData.ticker;
       if (!snap) return null;

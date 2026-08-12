@@ -320,6 +320,94 @@ describe("LiveMarketDataProvider universe cache", () => {
     );
   });
 
+  it("fetchEarningsData: nextEarningsDate is preserved when aggregates fetch fails", async () => {
+    // Financials succeeds with 4 filings; aggregates throws → earningsIvHistory
+    // must be null but nextEarningsDate must still be populated.
+    const FILING_DATE = "2026-05-08"; // arbitrary past date
+    let financialsCalls = 0;
+
+    globalThis.fetch = async (input: string | URL | Request): Promise<Response> => {
+      const url = input instanceof Request ? input.url : input.toString();
+      const urlObj = new URL(url);
+      const path = urlObj.pathname;
+
+      // Single-ticker snapshot (no "tickers" query param — distinguished from batch)
+      if (path.match(/\/v2\/snapshot\/locale\/us\/markets\/stocks\/tickers\/[A-Z]+$/)) {
+        return makeJsonResponse({ ticker: FULL_MOCK_TICKERS[0], status: "OK" });
+      }
+      if (url.includes("/vX/reference/financials")) {
+        financialsCalls++;
+        return makeJsonResponse({
+          results: [
+            { filing_date: FILING_DATE },
+            { filing_date: "2026-02-06" },
+            { filing_date: "2025-11-07" },
+            { filing_date: "2025-08-09" },
+          ],
+          status: "OK",
+        });
+      }
+      // Aggregates for IV history (limit=250) fail; avg-volume aggregates (limit=30) succeed
+      if (path.includes("/v2/aggs/ticker/")) {
+        if (urlObj.searchParams.get("limit") === "250") {
+          return new Response("Internal Server Error", { status: 500 });
+        }
+        return makeJsonResponse({
+          results: Array.from({ length: 30 }, (_, i) => ({
+            v: 50_000_000 + i * 100_000,
+            c: 150 + i * 0.1,
+            t: Date.now() - (30 - i) * 86_400_000,
+          })),
+          status: "OK",
+        });
+      }
+      // Options snapshot
+      if (path.includes("/v3/snapshot/options/")) {
+        return makeJsonResponse({
+          results: [
+            {
+              implied_volatility: 0.30,
+              open_interest: 1_000_000,
+              day: { volume: 500_000 },
+              details: { contract_type: "call", strike_price: 150, expiration_date: "2026-10-17" },
+              last_quote: { bid: 5.0, ask: 5.1 },
+            },
+          ],
+          status: "OK",
+        });
+      }
+      return makeJsonResponse({ status: "OK" });
+    };
+
+    // Unlimited rate limiter (0 RPM) for a focused single-ticker test
+    const provider = new LiveMarketDataProvider("test-api-key", 0, 300);
+    const quote = await provider.getStockQuote("AAPL");
+
+    // nextEarningsDate must be populated from the successful financials call
+    const expectedNext = new Date(FILING_DATE + "T00:00:00");
+    expectedNext.setDate(expectedNext.getDate() + 91);
+    const expectedDateStr = expectedNext.toISOString().split("T")[0]!;
+
+    assert.ok(quote !== null, "getStockQuote should succeed despite aggregates failure");
+    assert.equal(
+      quote!.nextEarningsDate,
+      expectedDateStr,
+      `nextEarningsDate must survive aggregates failure (got ${quote!.nextEarningsDate})`
+    );
+    assert.equal(
+      quote!.earningsIvHistory,
+      null,
+      "earningsIvHistory must be null when aggregates are unavailable"
+    );
+
+    // Only one financials call should have been made (not two)
+    assert.equal(
+      financialsCalls,
+      1,
+      `fetchEarningsData must make exactly one financials call (got ${financialsCalls})`
+    );
+  });
+
   it("getOptionsChain maps top-level implied_volatility and open_interest fields", async () => {
     const provider = new LiveMarketDataProvider("test-api-key", 10_000, 300);
     const chain = await provider.getOptionsChain("AAPL");
