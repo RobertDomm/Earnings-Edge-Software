@@ -735,6 +735,34 @@ describe("Filter 6 — Double Calendar Structure: positive cases", () => {
     );
   });
 
+  it("passes with minimum viable positive peaks ($0.01 call / $0.01 put) — boundary just above zero", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0.01, putCalendarPeak: 0.01 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      true,
+      "callCalendarPeak=$0.01 and putCalendarPeak=$0.01 are both strictly above zero — must pass"
+    );
+  });
+
+  it("fails when put peak is exactly $0.00 with call peak at $0.01 (put side on the zero line)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0.01, putCalendarPeak: 0.00 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "putCalendarPeak=$0.00 is not strictly above zero — must fail even when callCalendarPeak=$0.01"
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("put"),
+      `explanation must identify the put side as the failing leg (got: "${result.explanation}")`
+    );
+  });
+
   it("passing result: calculatedValue and explanation both reference strike prices and peak values", () => {
     // Use explicit strikes and peaks so assertions are unambiguous
     const stock = baseStock({
