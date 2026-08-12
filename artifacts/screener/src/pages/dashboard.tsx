@@ -142,7 +142,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
           <TerminalSquare className="h-5 w-5 text-primary" />
           <h1 className="font-mono font-bold tracking-widest text-sm uppercase text-foreground">
-            Circle Screener{" "}
+            EdgeFinder{" "}
             <span className="text-muted-foreground opacity-50 ml-2">v0.1.0</span>
           </h1>
         </div>
