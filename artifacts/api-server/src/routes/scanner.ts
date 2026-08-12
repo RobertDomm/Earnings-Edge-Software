@@ -29,15 +29,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type RequestHandler } from "express";
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/require-auth.js";
-import { marketDataProvider, screeningEngine } from "../services.js";
+import { marketDataProvider as defaultMarketDataProvider, screeningEngine as defaultScreeningEngine } from "../services.js";
+import type { IMarketDataProvider } from "../lib/market-data.js";
+import type { ScreeningEngine } from "../lib/screening-engine.js";
 import { getFilterDefinitions } from "../lib/screening-engine.js";
 import { logger } from "../lib/logger.js";
 import { db, pool, scannerResultsTable } from "@workspace/db";
-
-const router: IRouter = Router();
 
 // The single row that holds the latest scan result uses id=1.
 const RESULT_ROW_ID = 1;
@@ -143,112 +143,133 @@ async function finalizeScan(
   }
 }
 
-// GET /scanner/filters — return static filter definitions
-router.get("/scanner/filters", requireAuth, (_req, res): void => {
-  res.json({ filters: getFilterDefinitions() });
-});
+/**
+ * Factory — returns a fully configured scanner router.
+ *
+ * All three parameters are optional so that tests can inject stubs:
+ *   - `authMiddleware`   — pass a no-op in tests to skip session checks
+ *   - `marketProvider`  — pass a stub to avoid real network calls
+ *   - `engine`          — pass a stub when only exercising DB / route logic
+ *
+ * The production default export calls this with the real singletons.
+ */
+export function createScannerRouter(
+  authMiddleware: RequestHandler = requireAuth,
+  marketProvider: IMarketDataProvider = defaultMarketDataProvider,
+  engine: ScreeningEngine = defaultScreeningEngine,
+): IRouter {
+  const router: IRouter = Router();
 
-// POST /scanner/run — start a scan
-router.post("/scanner/run", requireAuth, async (_req, res): Promise<void> => {
-  // Atomically claim the scanner slot. Returns null when another instance
-  // holds an active (non-expired) lock.
-  const runId = await claimScannerSlot();
-  if (!runId) {
-    res.status(409).json({ error: "Scanner is already running" });
-    return;
-  }
+  // GET /scanner/filters — return static filter definitions
+  router.get("/scanner/filters", authMiddleware, (_req, res): void => {
+    res.json({ filters: getFilterDefinitions() });
+  });
 
-  // Respond immediately with the most recent result payload (may be from a
-  // previous run on any instance). The client polls GET /scanner/results.
-  const existing = await loadRow();
-  const now = new Date().toISOString();
-  res.json(
-    existing && existing.scanTime
-      ? {
-          stocks: existing.stocks,
-          totalScanned: existing.totalScanned,
-          totalQualified: existing.totalQualified,
-          totalQualifiedWithCaveats: existing.totalQualifiedWithCaveats,
-          scanTime: existing.scanTime,
-          dataAsOf: existing.dataAsOf,
-          dataFreshness: existing.dataFreshness,
-          status: "running",
-        }
-      : {
-          stocks: [],
-          totalScanned: 0,
-          totalQualified: 0,
-          totalQualifiedWithCaveats: 0,
-          scanTime: now,
-          dataAsOf: now,
-          dataFreshness: { timestamp: now, source: "live" },
-          status: "running",
-        }
-  );
+  // POST /scanner/run — start a scan
+  router.post("/scanner/run", authMiddleware, async (_req, res): Promise<void> => {
+    // Atomically claim the scanner slot. Returns null when another instance
+    // holds an active (non-expired) lock.
+    const runId = await claimScannerSlot();
+    if (!runId) {
+      res.status(409).json({ error: "Scanner is already running" });
+      return;
+    }
 
-  // Run the actual scan as a background task after the HTTP response is sent.
-  const scanTime = new Date();
-  void (async () => {
-    try {
-      const { stocks, dataFreshness } = await marketDataProvider.getStockUniverse();
-      const results = screeningEngine.runScreening(stocks);
+    // Respond immediately with the most recent result payload (may be from a
+    // previous run on any instance). The client polls GET /scanner/results.
+    const existing = await loadRow();
+    const now = new Date().toISOString();
+    res.json(
+      existing && existing.scanTime
+        ? {
+            stocks: existing.stocks,
+            totalScanned: existing.totalScanned,
+            totalQualified: existing.totalQualified,
+            totalQualifiedWithCaveats: existing.totalQualifiedWithCaveats,
+            scanTime: existing.scanTime,
+            dataAsOf: existing.dataAsOf,
+            dataFreshness: existing.dataFreshness,
+            status: "running",
+          }
+        : {
+            stocks: [],
+            totalScanned: 0,
+            totalQualified: 0,
+            totalQualifiedWithCaveats: 0,
+            scanTime: now,
+            dataAsOf: now,
+            dataFreshness: { timestamp: now, source: "live" },
+            status: "running",
+          }
+    );
 
-      await finalizeScan(runId, "complete", {
-        stocks: results,
-        totalScanned: results.length,
-        totalQualified: results.filter((r) => r.qualified).length,
-        totalQualifiedWithCaveats: results.filter((r) => r.qualifiedWithCaveats).length,
-        scanTime: scanTime.toISOString(),
-        dataAsOf: new Date().toISOString(),
-        dataFreshness,
-      });
+    // Run the actual scan as a background task after the HTTP response is sent.
+    const scanTime = new Date();
+    void (async () => {
+      try {
+        const { stocks, dataFreshness } = await marketProvider.getStockUniverse();
+        const results = engine.runScreening(stocks);
 
-      logger.info(
-        {
+        await finalizeScan(runId, "complete", {
+          stocks: results,
           totalScanned: results.length,
           totalQualified: results.filter((r) => r.qualified).length,
           totalQualifiedWithCaveats: results.filter((r) => r.qualifiedWithCaveats).length,
-          runId,
-        },
-        "Scanner run complete"
-      );
-    } catch (err) {
-      // Error write is also run_id-gated; if another instance reclaimed the
-      // slot, we log but do not overwrite its state.
-      await finalizeScan(runId, "error");
-      logger.error({ err, runId }, "Scanner run failed");
-    }
-  })();
-});
+          scanTime: scanTime.toISOString(),
+          dataAsOf: new Date().toISOString(),
+          dataFreshness,
+        });
 
-// GET /scanner/results — get last scan results and status
-router.get("/scanner/results", requireAuth, async (_req, res): Promise<void> => {
-  const row = await loadRow();
-
-  if (!row || !row.scanTime) {
-    res.json({
-      hasResults: false,
-      status: (row?.status ?? "idle") as ScanStatus,
-      lastScan: null,
-      lastScanTime: null,
-    });
-    return;
-  }
-
-  res.json({
-    hasResults: true,
-    status: row.status as ScanStatus,
-    lastScan: {
-      stocks: row.stocks,
-      totalScanned: row.totalScanned,
-      totalQualified: row.totalQualified,
-      totalQualifiedWithCaveats: row.totalQualifiedWithCaveats,
-      scanTime: row.scanTime,
-      dataAsOf: row.dataAsOf,
-      dataFreshness: row.dataFreshness,
-    },
-    lastScanTime: row.scanTime,
+        logger.info(
+          {
+            totalScanned: results.length,
+            totalQualified: results.filter((r) => r.qualified).length,
+            totalQualifiedWithCaveats: results.filter((r) => r.qualifiedWithCaveats).length,
+            runId,
+          },
+          "Scanner run complete"
+        );
+      } catch (err) {
+        // Error write is also run_id-gated; if another instance reclaimed the
+        // slot, we log but do not overwrite its state.
+        await finalizeScan(runId, "error");
+        logger.error({ err, runId }, "Scanner run failed");
+      }
+    })();
   });
-});
 
-export default router;
+  // GET /scanner/results — get last scan results and status
+  router.get("/scanner/results", authMiddleware, async (_req, res): Promise<void> => {
+    const row = await loadRow();
+
+    if (!row || !row.scanTime) {
+      res.json({
+        hasResults: false,
+        status: (row?.status ?? "idle") as ScanStatus,
+        lastScan: null,
+        lastScanTime: null,
+      });
+      return;
+    }
+
+    res.json({
+      hasResults: true,
+      status: row.status as ScanStatus,
+      lastScan: {
+        stocks: row.stocks,
+        totalScanned: row.totalScanned,
+        totalQualified: row.totalQualified,
+        totalQualifiedWithCaveats: row.totalQualifiedWithCaveats,
+        scanTime: row.scanTime,
+        dataAsOf: row.dataAsOf,
+        dataFreshness: row.dataFreshness,
+      },
+      lastScanTime: row.scanTime,
+    });
+  });
+
+  return router;
+}
+
+/** Production default: real auth, real market provider, real screening engine. */
+export default createScannerRouter();
