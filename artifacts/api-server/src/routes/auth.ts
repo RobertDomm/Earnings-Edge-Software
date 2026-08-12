@@ -47,7 +47,7 @@ router.get("/auth/login", async (req, res): Promise<void> => {
     const scenario =
       typeof req.query.scenario === "string"
         ? req.query.scenario
-        : "authorized";
+        : "anonymous";
 
     const result = await circleAuthService.validateAuthCode(scenario);
 

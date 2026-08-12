@@ -38,8 +38,16 @@ const FILTER_DATA: FilterList = {
   ],
 };
 
-function makeCounts(entries: [string, number][], total: number) {
-  return { counts: new Map<string, number>(entries), total };
+function makeCounts(
+  entries: [string, number][],
+  total: number,
+  bypassEntries: [string, number][] = [],
+) {
+  return {
+    counts: new Map<string, number>(entries),
+    bypassCounts: new Map<string, number>(bypassEntries),
+    total,
+  };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -111,6 +119,40 @@ describe("FiltersPanel pass counts", () => {
 
     const allPassed = screen.getAllByText("10/10 passed");
     expect(allPassed).toHaveLength(3);
+  });
+
+  it("shows 'bypassed by provider' when all stocks had a filter bypassed (ThetaData mode)", () => {
+    mockUseGetScannerFilters.mockReturnValue({ data: FILTER_DATA, isLoading: false, isError: false });
+
+    // Simulate ThetaData: IV Rank bypassed for all 20 stocks (no earnings data from provider)
+    const counts = makeCounts(
+      [["Liquidity", 15], ["Spread Width", 12]],
+      20,
+      [["IV Rank", 20]], // all 20 stocks had IV Rank bypassed
+    );
+
+    render(<FiltersPanel filterPassCounts={counts} />);
+
+    expect(screen.getByText("20/20 bypassed by provider")).toBeInTheDocument();
+    // The other filters still show genuine pass counts
+    expect(screen.getByText("15/20 passed")).toBeInTheDocument();
+    expect(screen.getByText("12/20 passed")).toBeInTheDocument();
+    // The bypassed badge should be visible
+    expect(screen.getByText("bypassed")).toBeInTheDocument();
+  });
+
+  it("shows mixed 'passed • bypassed' note when some stocks bypassed and some passed a filter", () => {
+    mockUseGetScannerFilters.mockReturnValue({ data: FILTER_DATA, isLoading: false, isError: false });
+
+    const counts = makeCounts(
+      [["IV Rank", 5], ["Liquidity", 15]],
+      20,
+      [["IV Rank", 10]], // 10 bypassed, 5 genuinely passed → mixed
+    );
+
+    render(<FiltersPanel filterPassCounts={counts} />);
+
+    expect(screen.getByText("5/20 passed • 10 bypassed ⚠")).toBeInTheDocument();
   });
 
   it("renders a loading skeleton while filter definitions are loading", () => {

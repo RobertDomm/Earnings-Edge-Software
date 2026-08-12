@@ -111,21 +111,25 @@ export default function Dashboard() {
     });
   };
 
-  // Derive per-filter pass counts from the last scan's filterResults.
+  // Derive per-filter pass counts (and bypass counts) from the last scan's filterResults.
   // Must be declared before any conditional return to preserve hook order.
   const filterPassCounts = useMemo(() => {
     const lastScan = scannerState?.lastScan;
     if (!lastScan) return null; // no scan run yet
     const total = lastScan.stocks.length;
     const counts = new Map<string, number>();
+    const bypassCounts = new Map<string, number>();
     for (const stock of lastScan.stocks) {
       for (const fr of stock.filterResults) {
         if (fr.passed) {
           counts.set(fr.name, (counts.get(fr.name) ?? 0) + 1);
         }
+        if (fr.bypassed) {
+          bypassCounts.set(fr.name, (bypassCounts.get(fr.name) ?? 0) + 1);
+        }
       }
     }
-    return { counts, total };
+    return { counts, bypassCounts, total };
   }, [scannerState?.lastScan]);
 
   if (!auth?.authorized) return null;
