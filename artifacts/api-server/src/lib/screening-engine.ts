@@ -48,8 +48,10 @@ export interface IFilterRule {
   description: string;
   /** Representative threshold string for display (stock-price-independent) */
   defaultThreshold: string;
-  /** Evaluate this rule against a single stock quote */
-  evaluate(stock: StockQuote): FilterResult;
+  /** Evaluate this rule against a single stock quote.
+   * @param today  Optional override for "today" (defaults to `new Date()`).
+   *               Pass a fixed value in tests to make assertions hermetic. */
+  evaluate(stock: StockQuote, today?: Date): FilterResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +121,7 @@ const filter2: IFilterRule = {
   name: "Filter 2 — Earnings in 2 Weeks",
   description: "Selects stocks whose next earnings announcement falls 14–18 calendar days out — the entry window for this strategy.",
   defaultThreshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
-  evaluate(stock) {
+  evaluate(stock, today?: Date) {
     if (!stock.nextEarningsDate) {
       return {
         name: this.name,
@@ -130,11 +132,11 @@ const filter2: IFilterRule = {
       };
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const _today = new Date(today ?? new Date());
+    _today.setHours(0, 0, 0, 0);
     const earningsDate = new Date(stock.nextEarningsDate + "T00:00:00");
     const daysUntil = Math.round(
-      (earningsDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      (earningsDate.getTime() - _today.getTime()) / (1000 * 60 * 60 * 24)
     );
 
     const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
@@ -309,7 +311,7 @@ const filter5: IFilterRule = {
   name: "Filter 5 — Earnings Verified 2 Weeks Out",
   description: "Final re-confirmation that earnings still fall in the 14–18 day window — the explicit sign-off before a position is considered.",
   defaultThreshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
-  evaluate(stock) {
+  evaluate(stock, today?: Date) {
     if (!stock.nextEarningsDate) {
       return {
         name: this.name,
@@ -320,11 +322,11 @@ const filter5: IFilterRule = {
       };
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const _today = new Date(today ?? new Date());
+    _today.setHours(0, 0, 0, 0);
     const earningsDate = new Date(stock.nextEarningsDate + "T00:00:00");
     const daysUntil = Math.round(
-      (earningsDate.getTime() - today.getTime()) / 86_400_000
+      (earningsDate.getTime() - _today.getTime()) / 86_400_000
     );
     const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
 
