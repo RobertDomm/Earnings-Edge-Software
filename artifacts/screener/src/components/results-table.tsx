@@ -20,7 +20,7 @@ type SortOrder = "asc" | "desc" | null;
 
 export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTableProps) {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "qualified" | "not_qualified">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pass" | "partial">("all");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
@@ -48,7 +48,11 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
     return stocks.filter(s => {
       const matchesSearch = s.symbol.toLowerCase().includes(search.toLowerCase()) || 
                             s.company.toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === "all" || s.status === statusFilter;
+      const isPartialPass = s.status !== "qualified" && (s.filterResults?.[0]?.passed ?? false);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "pass" && s.status === "qualified") ||
+        (statusFilter === "partial" && isPartialPass);
       return matchesSearch && matchesStatus;
     }).sort((a, b) => {
       if (!sortKey || !sortOrder) return 0;
@@ -103,9 +107,9 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
               <SelectValue placeholder="Filter Status" />
             </SelectTrigger>
             <SelectContent className="rounded-none border-border">
-              <SelectItem value="all" className="font-mono text-xs">All Statuses</SelectItem>
-              <SelectItem value="qualified" className="font-mono text-xs">Qualified Only</SelectItem>
-              <SelectItem value="not_qualified" className="font-mono text-xs">Not Qualified</SelectItem>
+              <SelectItem value="all" className="font-mono text-xs">All Status</SelectItem>
+              <SelectItem value="pass" className="font-mono text-xs">Pass</SelectItem>
+              <SelectItem value="partial" className="font-mono text-xs">Partial Pass</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -208,12 +212,19 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                         {stock.filterScore.toFixed(2)}
                       </TableCell>
                       <TableCell className="px-3 py-2.5 text-center">
-                        <Badge 
-                          variant={stock.status === "qualified" ? "success" : "danger"}
-                          className="font-mono text-[10px] uppercase tracking-wider rounded-none px-1.5 py-0"
-                        >
-                          {stock.status.replace("_", " ")}
-                        </Badge>
+                        {(() => {
+                          const isPartial = stock.status !== "qualified" && (stock.filterResults?.[0]?.passed ?? false);
+                          const label = stock.status === "qualified" ? "Pass" : isPartial ? "Partial Pass" : "Failed";
+                          const variant = stock.status === "qualified" ? "success" : isPartial ? "warning" : "danger";
+                          return (
+                            <Badge
+                              variant={variant as any}
+                              className="font-mono text-[10px] uppercase tracking-wider rounded-none px-1.5 py-0"
+                            >
+                              {label}
+                            </Badge>
+                          );
+                        })()}
                       </TableCell>
                     </TableRow>
                   );
