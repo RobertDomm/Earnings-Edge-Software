@@ -830,6 +830,22 @@ describe("Filter 6 — Double Calendar Structure: negative cases", () => {
     );
   });
 
+  it("fails when callCalendarPeak is $0.00 with putCalendarPeak at $0.01 (call side on the zero line)", () => {
+    const stock = baseStock({
+      liquidityMetrics: calendarMetrics({ callCalendarPeak: 0.00, putCalendarPeak: 0.01 }),
+    });
+    const result = filter6.evaluate(stock);
+    assert.equal(
+      result.passed,
+      false,
+      "callCalendarPeak=$0.00 is not strictly above zero — must fail even when putCalendarPeak=$0.01"
+    );
+    assert.ok(
+      result.explanation.toLowerCase().includes("call"),
+      `explanation must identify the call side as the failing leg (got: "${result.explanation}")`
+    );
+  });
+
   it("fails when callCalendarPeak is negative (call-side peak below zero line)", () => {
     const stock = baseStock({
       liquidityMetrics: calendarMetrics({ callCalendarPeak: -0.43, putCalendarPeak: 1.18 }),
