@@ -315,4 +315,88 @@ describe("Session persistence across server restarts", () => {
 
     await stopServer(server.server);
   });
+
+  // ── Expired session is rejected ───────────────────────────────────────────
+  //
+  // Steps:
+  // 1. Log in through the test server to get a real, properly-signed cookie.
+  // 2. Back-date the session row's expire column to a timestamp in the past.
+  // 3. Replay the cookie against a fresh server instance.
+  // 4. Assert that the response returns authenticated: false.
+  //
+  // connect-pg-simple only returns a session row when its expire column is
+  // still in the future, so this test exercises the enforcement path without
+  // needing to hand-craft signed cookies.
+
+  it("an expired session cookie returns authenticated false", async () => {
+    // ── Step 1: Log in to obtain a real session id and signed cookie ──────
+    const serverA = await startServer();
+
+    const loginRes = await fetch(`${serverA.url}/test-login`, {
+      method: "POST",
+    });
+    assert.equal(
+      loginRes.status,
+      200,
+      `Login must return 200 (got ${loginRes.status})`,
+    );
+
+    const loginBody = (await loginRes.json()) as {
+      ok: boolean;
+      sessionId: string;
+    };
+    const sessionId = loginBody.sessionId;
+    sessionIdsToCleanup.push(sessionId);
+
+    const cookieValue = extractCookieValue(loginRes.headers.get("set-cookie"));
+
+    // Confirm the session is currently valid before we expire it.
+    const preCheckRes = await fetch(`${serverA.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    const preCheckBody = (await preCheckRes.json()) as {
+      authenticated: boolean;
+    };
+    assert.equal(
+      preCheckBody.authenticated,
+      true,
+      "Session must be authenticated before expiry manipulation",
+    );
+
+    await stopServer(serverA.server);
+
+    // ── Step 2: Back-date the expire column to a timestamp in the past ────
+    // Use the raw session id (without the "sess:" prefix) as stored by
+    // connect-pg-simple — which is exactly what req.session.id returns.
+    await sharedPool.query(
+      `UPDATE "session" SET expire = NOW() - INTERVAL '1 minute' WHERE sid = $1`,
+      [sessionId],
+    );
+
+    // ── Step 3: Replay the cookie against a fresh server ─────────────────
+    const serverB = await startServer();
+
+    const expiredRes = await fetch(`${serverB.url}/test-status`, {
+      headers: { Cookie: cookieValue },
+    });
+    assert.equal(
+      expiredRes.status,
+      200,
+      `Status route must return 200 even for expired sessions (got ${expiredRes.status})`,
+    );
+
+    // ── Step 4: Assert the session is no longer authenticated ─────────────
+    const expiredBody = (await expiredRes.json()) as {
+      authenticated: boolean;
+      userId: string | null;
+    };
+    assert.equal(
+      expiredBody.authenticated,
+      false,
+      "An expired session must not be accepted as authenticated " +
+        `(userId: ${expiredBody.userId}, authenticated: ${expiredBody.authenticated})`,
+    );
+
+    await stopServer(serverB.server);
+  });
 });
