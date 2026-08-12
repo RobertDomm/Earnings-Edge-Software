@@ -171,8 +171,8 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                               key={flash.animKey}
                               className={`delta-badge inline-block text-[10px] font-mono font-semibold px-1 py-0 leading-tight rounded-sm whitespace-nowrap ${
                                 flash.direction === "up"
-                                  ? "bg-emerald-500/20 text-emerald-400"
-                                  : "bg-red-500/20 text-red-400"
+                                  ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                  : "bg-red-500/20 text-red-600 dark:text-red-400"
                               }`}
                             >
                               {flash.delta >= 0 ? "+" : ""}
