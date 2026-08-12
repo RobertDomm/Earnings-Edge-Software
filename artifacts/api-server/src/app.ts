@@ -1,9 +1,13 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { pool } from "@workspace/db";
+
+const PgSession = connectPgSimple(session);
 
 const app: Express = express();
 
@@ -76,7 +80,9 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session middleware — uses SESSION_SECRET from Replit Secrets
+// Session middleware — uses SESSION_SECRET from Replit Secrets.
+// Sessions are stored in PostgreSQL (connect-pg-simple) so they survive
+// across container restarts and multiple autoscale instances.
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) {
   logger.error("SESSION_SECRET environment variable is required");
@@ -85,6 +91,15 @@ if (!sessionSecret) {
 
 app.use(
   session({
+    store: new PgSession({
+      pool,
+      // The session table is provisioned by runStartupMigrations() before the
+      // server begins accepting traffic, so lazy creation is not needed and is
+      // disabled to prevent concurrent cold-start races.
+      createTableIfMissing: false,
+      // Prune expired sessions every hour.
+      pruneSessionInterval: 60 * 60,
+    }),
     secret: sessionSecret,
     name: "screener.sid",
     resave: false,
