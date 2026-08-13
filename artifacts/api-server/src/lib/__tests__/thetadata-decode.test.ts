@@ -757,6 +757,7 @@ function makeThetaDataStockWithPolygon(overrides: Partial<StockQuote> = {}): Sto
     ...makeThetaDataStock(),
     // … but override the two fields that Polygon now supplies:
     nextEarningsDate:  daysFromToday(14),  // always 14 days from today → inside F2/F5 window
+    upcomingEvents:    [],                 // events lookup succeeded, clean calendar → F5 event check passes
     earningsIvHistory: [              // 4/4 ivRose → F4 passes
       { earningsDate: "2025-08-01", ivBaseline: 0.28, ivBeforeEarnings: 0.45, ivRose: true },
       { earningsDate: "2025-11-01", ivBaseline: 0.31, ivBeforeEarnings: 0.49, ivRose: true },

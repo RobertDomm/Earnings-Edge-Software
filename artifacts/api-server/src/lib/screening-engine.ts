@@ -356,17 +356,26 @@ const filter4: IFilterRule = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter 5 — Verify Earnings Are 2 Weeks Out (final gate)
+// Filter 5 — Earnings Is the Only Upcoming Event (final gate)
 //
-// Final re-confirmation that earnings still fall in the 14–18 day window.
-// Filter 2 makes the initial cut; Filter 5 is the explicit sign-off at the
-// end of the checklist before a position is considered.
+// Two checks before sign-off:
+//   1. Re-confirm earnings still fall in the 14–18 day window (Filter 2 made
+//      the initial cut).
+//   2. Verify earnings is the ONLY known upcoming catalyst — no ex-dividend
+//      date or stock split lands between today and the earnings date. The
+//      strategy's edge depends on the pre-earnings IV run-up being purely
+//      earnings-driven, so a rival event disqualifies the stock.
+// If event data is unavailable, the event check is bypassed (not silently
+// passed), matching the null-data convention of Filters 2 and 4.
 // ---------------------------------------------------------------------------
 
+const FILTER5_THRESHOLD = `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out; no dividend/split before earnings`;
+
 const filter5: IFilterRule = {
-  name: "Filter 5 — Earnings Verified 2 Weeks Out",
-  description: "Final re-confirmation that earnings still fall in the 14–18 day window — the explicit sign-off before a position is considered.",
-  defaultThreshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
+  name: "Filter 5 — Earnings Is the Only Upcoming Event",
+  description:
+    "Final sign-off: re-confirms earnings fall in the 14–18 day window AND that earnings is the only known upcoming event — no ex-dividend date or stock split lands before earnings to muddy the pre-earnings IV run-up.",
+  defaultThreshold: FILTER5_THRESHOLD,
   evaluate(stock, today?: Date) {
     if (!stock.nextEarningsDate) {
       // No earnings date from the data provider — mark as bypassed, matching Filter 2 behaviour.
@@ -375,8 +384,8 @@ const filter5: IFilterRule = {
         passed: false,
         bypassed: true,
         calculatedValue: "No earnings date",
-        threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
-        explanation: `Earnings date unavailable for ${stock.symbol} from the current data provider — filter bypassed. Verify the earnings window manually before entry.`,
+        threshold: FILTER5_THRESHOLD,
+        explanation: `Earnings date unavailable for ${stock.symbol} from the current data provider — filter bypassed. Verify the earnings window and event calendar manually before entry.`,
       };
     }
 
@@ -386,24 +395,69 @@ const filter5: IFilterRule = {
     const daysUntil = Math.round(
       (earningsDate.getTime() - _today.getTime()) / 86_400_000
     );
-    const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
+    const inWindow = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
+
+    if (!inWindow) {
+      return {
+        name: this.name,
+        passed: false,
+        bypassed: false,
+        calculatedValue:
+          daysUntil < 0
+            ? `${Math.abs(daysUntil)}d ago`
+            : `${daysUntil}d (${stock.nextEarningsDate})`,
+        threshold: FILTER5_THRESHOLD,
+        explanation:
+          daysUntil < 0
+            ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Waiting for next cycle.`
+            : daysUntil < EARNINGS_WINDOW_MIN
+            ? `${stock.symbol} reports in ${daysUntil} days — window has closed. Too late to enter.`
+            : `${stock.symbol} reports in ${daysUntil} days — not yet in the entry window.`,
+      };
+    }
+
+    // --- Earnings window confirmed. Now: is earnings the ONLY upcoming event? ---
+    const events = stock.upcomingEvents;
+
+    if (events == null) {
+      // Event data unavailable — bypass the event check rather than silently passing.
+      return {
+        name: this.name,
+        passed: false,
+        bypassed: true,
+        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}) — event data unavailable`,
+        threshold: FILTER5_THRESHOLD,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — in the entry window — but the upcoming-events check could not run (event data unavailable). Verify manually that no dividend or split lands before earnings.`,
+      };
+    }
+
+    // Conflicting events: any dividend/split dated after today and on or
+    // before the earnings date competes with earnings as a catalyst.
+    const earningsDateStr = stock.nextEarningsDate;
+    const todayStr = `${_today.getFullYear()}-${String(_today.getMonth() + 1).padStart(2, "0")}-${String(_today.getDate()).padStart(2, "0")}`;
+    const conflicts = events.filter((e) => e.date > todayStr && e.date <= earningsDateStr);
+
+    if (conflicts.length > 0) {
+      const detail = conflicts
+        .map((e) => `${e.type === "dividend" ? "ex-dividend date" : "stock split"} on ${e.date}`)
+        .join(", ");
+      return {
+        name: this.name,
+        passed: false,
+        bypassed: false,
+        calculatedValue: `${conflicts.length} conflicting event(s)`,
+        threshold: FILTER5_THRESHOLD,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}), but earnings is not the only upcoming event: ${detail}. A rival catalyst muddies the pure earnings IV run-up — disqualified.`,
+      };
+    }
 
     return {
       name: this.name,
-      passed,
+      passed: true,
       bypassed: false,
-      calculatedValue:
-        daysUntil < 0
-          ? `${Math.abs(daysUntil)}d ago`
-          : `${daysUntil}d (${stock.nextEarningsDate})`,
-      threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
-      explanation: passed
-        ? `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — in the 2-week entry window.`
-        : daysUntil < 0
-        ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Waiting for next cycle.`
-        : daysUntil < EARNINGS_WINDOW_MIN
-        ? `${stock.symbol} reports in ${daysUntil} days — window has closed. Too late to enter.`
-        : `${stock.symbol} reports in ${daysUntil} days — not yet in the entry window.`,
+      calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}) — no rival events`,
+      threshold: FILTER5_THRESHOLD,
+      explanation: `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — in the 2-week entry window, and earnings is the only known upcoming event (no dividends or splits before earnings).`,
     };
   },
 };

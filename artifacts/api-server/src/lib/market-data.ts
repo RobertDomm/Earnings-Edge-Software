@@ -19,6 +19,13 @@
  * scan can serve data from cache rather than blocking an HTTP request.
  */
 
+/** A structured upcoming corporate event that could rival earnings as a catalyst. */
+export interface UpcomingCorporateEvent {
+  type: "dividend" | "split";
+  /** Event date (ex-dividend date or split execution date), YYYY-MM-DD. */
+  date: string;
+}
+
 export interface StockQuote {
   symbol: string;
   company: string;
@@ -42,6 +49,15 @@ export interface StockQuote {
    * date + 91 days; mock provider uses hardcoded realistic dates.
    */
   nextEarningsDate: string | null;
+  /**
+   * Known upcoming corporate events (ex-dividend dates, splits) between today
+   * and shortly after earnings. Used by Filter 5 to verify earnings is the
+   * only upcoming catalyst.
+   *   []        → lookup succeeded, no events found
+   *   null      → lookup failed or unavailable (Filter 5 bypasses the check)
+   *   undefined → provider predates the field (treated like null)
+   */
+  upcomingEvents?: UpcomingCorporateEvent[] | null;
   /**
    * Options liquidity metrics computed from the ~11 DTE chain.
    * Used by Filter 3. Null when no options data is available.
@@ -198,6 +214,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_240_500,
     sector: "tech",
     nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (window: 14–18d)
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451, shortCallStrike: 207.5, shortPutStrike: 172.5, callCalendarPeak: 1.24, putCalendarPeak: 0.98 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.276, ivBeforeEarnings: 0.418, ivRose: true },
@@ -219,6 +236,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 3_482_100,
     sector: "tech",
     nextEarningsDate: "2026-09-05", // 24 days → FAIL F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3 (spread)
     earningsIvHistory: [ // 4/4 rise (solid pattern but fails F2+F3)
       { earningsDate: "2025-08-09", ivBaseline: 0.512, ivBeforeEarnings: 0.781, ivRose: true },
@@ -240,6 +258,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 892_300,
     sector: "tech",
     nextEarningsDate: "2026-09-10", // 29 days → FAIL F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214, shortCallStrike: 452.5, shortPutStrike: 377.5, callCalendarPeak: 2.87, putCalendarPeak: 2.41 }, // FAIL F2 (earnings 29d away)
     earningsIvHistory: [ // 4/4 rise (would qualify if earnings were in window)
       { earningsDate: "2025-08-09", ivBaseline: 0.198, ivBeforeEarnings: 0.281, ivRose: true },
@@ -261,6 +280,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 4_821_600,
     sector: "automotive",
     nextEarningsDate: "2026-08-27", // 15 days → PASS F2 (but fails F4)
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948, shortCallStrike: 272.5, shortPutStrike: 225.0, callCalendarPeak: 3.82, putCalendarPeak: 3.14 }, // FAIL F4
     earningsIvHistory: [ // 3/4 rise → FAIL F4 (IV dropped one cycle)
       { earningsDate: "2025-08-09", ivBaseline: 0.724, ivBeforeEarnings: 0.981, ivRose: true },
@@ -282,6 +302,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_102_400,
     sector: "tech",
     nextEarningsDate: "2026-08-29", // 17 days → PASS F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521, shortCallStrike: 560.0, shortPutStrike: 467.5, callCalendarPeak: 3.42, putCalendarPeak: 2.91 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.342, ivBeforeEarnings: 0.524, ivRose: true },
@@ -303,6 +324,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_048_300,
     sector: "tech",
     nextEarningsDate: "2026-08-14", // 2 days → FAIL F2 (too close — window opens at 14d)
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281, shortCallStrike: 210.0, shortPutStrike: 177.5, callCalendarPeak: 1.48, putCalendarPeak: 1.22 }, // FAIL F2 (earnings 2d away)
     earningsIvHistory: null, // earnings outside window; skip for mock clarity
   },
@@ -319,6 +341,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 2_937_100,
     sector: "tech",
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847, shortCallStrike: 185.0, shortPutStrike: 152.5, callCalendarPeak: 2.31, putCalendarPeak: 1.87 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.581, ivBeforeEarnings: 0.842, ivRose: true },
@@ -340,6 +363,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 12_483_200,
     sector: "etf",
     nextEarningsDate: null, // ETF — no earnings → FAIL F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.05, nearTermDte: 7, nearTermIv: 0.145, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // ETF — no calendar structure
     earningsIvHistory: null, // ETF — no earnings cycle
   },
@@ -356,6 +380,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 748_600,
     sector: "tech",
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419, shortCallStrike: 197.5, shortPutStrike: 162.5, callCalendarPeak: -0.43, putCalendarPeak: 1.18 }, // FAIL F6 — call peak below zero
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.271, ivBeforeEarnings: 0.413, ivRose: true },
@@ -377,6 +402,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_823_700,
     sector: "tech",
     nextEarningsDate: "2026-09-01", // 20 days → FAIL F2
+    upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3
     earningsIvHistory: null,
   },
@@ -394,6 +420,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 892_400,
     sector: "oil",
     nextEarningsDate: null,
+    upcomingEvents: [],
     liquidityMetrics: null,
     earningsIvHistory: null,
   },
@@ -410,6 +437,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 312_700,
     sector: "healthcare",
     nextEarningsDate: null,
+    upcomingEvents: [],
     liquidityMetrics: null,
     earningsIvHistory: null,
   },
@@ -426,6 +454,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 248_300,
     sector: "biotech",
     nextEarningsDate: null,
+    upcomingEvents: [],
     liquidityMetrics: null,
     earningsIvHistory: null,
   },
@@ -1122,6 +1151,110 @@ export function clearPolygonEarningsCache(): void {
   polygonEarningsCache.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Upcoming corporate events (dividends, splits) — Filter 5's "earnings is the
+// only upcoming event" check
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches known upcoming corporate events (ex-dividend dates and split
+ * execution dates) for a ticker from Polygon.
+ *
+ * Returns [] when the lookup succeeds and no events are scheduled, or null
+ * when the lookup fails (logged with a classified reason). Never throws.
+ */
+export async function fetchPolygonUpcomingEvents(
+  apiKey: string,
+  ticker: string,
+  opts: PolygonEarningsFetchOptions = {},
+): Promise<UpcomingCorporateEvent[] | null> {
+  const baseUrl = "https://api.polygon.io";
+  const maxRetries = opts.retries ?? 2;
+  const retryBaseMs = opts.retryBaseMs ?? 250;
+
+  async function polyFetch<T>(path: string, params: Record<string, string>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const url = new URL(`${baseUrl}${path}`);
+        url.searchParams.set("apiKey", apiKey);
+        for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+        const res = await fetch(url.toString());
+        if (!res.ok) {
+          const body = await res.text().catch(() => "(no body)");
+          throw new PolygonHttpError(`Polygon ${res.status} for ${path}: ${res.statusText} — ${body}`, res.status);
+        }
+        return (await res.json()) as T;
+      } catch (err) {
+        if (attempt >= maxRetries || !isRetryablePolygonError(err)) throw err;
+        await new Promise((r) => setTimeout(r, retryBaseMs * 2 ** attempt));
+      }
+    }
+  }
+
+  // Local YYYY-MM-DD for "today" (consistent with filter date handling)
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  try {
+    const [dividends, splits] = await Promise.all([
+      polyFetch<{ results?: Array<{ ex_dividend_date?: string }> }>("/v3/reference/dividends", {
+        ticker,
+        "ex_dividend_date.gte": today,
+        limit: "10",
+        sort: "ex_dividend_date",
+        order: "asc",
+      }),
+      polyFetch<{ results?: Array<{ execution_date?: string }> }>("/v3/reference/splits", {
+        ticker,
+        "execution_date.gte": today,
+        limit: "10",
+        sort: "execution_date",
+        order: "asc",
+      }),
+    ]);
+
+    const events: UpcomingCorporateEvent[] = [];
+    for (const d of dividends.results ?? []) {
+      if (d.ex_dividend_date) events.push({ type: "dividend", date: d.ex_dividend_date });
+    }
+    for (const s of splits.results ?? []) {
+      if (s.execution_date) events.push({ type: "split", date: s.execution_date });
+    }
+    events.sort((a, b) => a.date.localeCompare(b.date));
+    return events;
+  } catch (err) {
+    console.warn(
+      `[PolygonEvents] ${ticker}: upcoming-events fetch failed after retries — ${classifyPolygonError(err)}. ` +
+      `Filter 5's event check will bypass this ticker.`,
+    );
+    return null;
+  }
+}
+
+const polygonEventsCache = new Map<string, { data: UpcomingCorporateEvent[]; fetchedAt: number }>();
+
+/** Test hook: empty the per-ticker upcoming-events cache. */
+export function clearPolygonEventsCache(): void {
+  polygonEventsCache.clear();
+}
+
+/**
+ * Cached wrapper around fetchPolygonUpcomingEvents (24h TTL, same policy as
+ * the earnings cache: only successful lookups are cached).
+ */
+export async function fetchPolygonUpcomingEventsCached(
+  apiKey: string,
+  ticker: string,
+  opts: PolygonEarningsFetchOptions = {},
+): Promise<UpcomingCorporateEvent[] | null> {
+  const hit = polygonEventsCache.get(ticker);
+  if (hit && Date.now() - hit.fetchedAt < POLYGON_EARNINGS_CACHE_TTL_MS) return hit.data;
+
+  const data = await fetchPolygonUpcomingEvents(apiKey, ticker, opts);
+  if (data !== null) polygonEventsCache.set(ticker, { data, fetchedAt: Date.now() });
+  return data;
+}
+
 /**
  * Cached wrapper around fetchPolygonEarningsData. Returns the cached result
  * for a ticker when it is younger than 24h; otherwise fetches and caches the
@@ -1702,10 +1835,11 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             safeNum(snap.day?.c) ||
             safeNum(snap.prevDay?.c);
 
-          const [optStats, avgVol, earningsData] = await Promise.all([
+          const [optStats, avgVol, earningsData, upcomingEvents] = await Promise.all([
             this.fetchOptionsStats(snap.ticker),
             this.fetchAvgVolume(snap.ticker),
             this.fetchEarningsData(snap.ticker),
+            fetchPolygonUpcomingEventsCached(this.apiKey, snap.ticker),
           ]);
           const { nextEarningsDate, earningsIvHistory } = earningsData;
 
@@ -1722,6 +1856,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             openInterest: optStats.openInterest,
             sector: TICKER_SECTORS[snap.ticker] ?? "other",
             nextEarningsDate,
+            upcomingEvents,
             liquidityMetrics: optStats.liquidityMetrics,
             earningsIvHistory,
           });
@@ -1741,13 +1876,14 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
 
   async getStockQuote(symbol: string): Promise<StockQuote | null> {
     try {
-      const [snapData, optStats, avgVol, earningsData] = await Promise.all([
+      const [snapData, optStats, avgVol, earningsData, upcomingEvents] = await Promise.all([
         this.polygonFetch<{ ticker?: PolygonTickerSnapshot }>(
           `/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
         ),
         this.fetchOptionsStats(symbol),
         this.fetchAvgVolume(symbol),
         this.fetchEarningsData(symbol),
+        fetchPolygonUpcomingEventsCached(this.apiKey, symbol),
       ]);
       const { nextEarningsDate, earningsIvHistory } = earningsData;
 
@@ -1773,6 +1909,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         openInterest: optStats.openInterest,
         sector: TICKER_SECTORS[symbol] ?? "other",
         nextEarningsDate,
+        upcomingEvents,
         liquidityMetrics: optStats.liquidityMetrics,
         earningsIvHistory,
       };
@@ -2719,6 +2856,16 @@ export class ThetaDataProvider implements IMarketDataProvider {
           })
         : { nextEarningsDate: null as string | null, earningsIvHistory: null as EarningsIvRecord[] | null };
 
+      const upcomingEvents = this.polygonApiKey
+        ? await fetchPolygonUpcomingEventsCached(this.polygonApiKey, symbol).catch((err: unknown) => {
+            console.warn(
+              `[ThetaDataProvider] ${symbol}: unexpected upcoming-events failure — ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+            );
+            return null;
+          })
+        : null;
+
       return {
         symbol,
         company:             TICKER_NAMES[symbol] ?? symbol,
@@ -2732,6 +2879,7 @@ export class ThetaDataProvider implements IMarketDataProvider {
         openInterest:        metrics?.openInterest      ?? 0,
         sector:              TICKER_SECTORS[symbol] ?? "other",
         nextEarningsDate:    earningsData.nextEarningsDate,
+        upcomingEvents,
         liquidityMetrics:    metrics?.liquidityMetrics ?? null,
         earningsIvHistory:   earningsData.earningsIvHistory,
       };

@@ -92,6 +92,10 @@ function baseStock(overrides: Partial<StockQuote> = {}): StockQuote {
     openInterest: 500_000,
     sector: "tech",
     nextEarningsDate: null,
+    // Default: events lookup succeeded and found nothing — the "clean" case.
+    // Filter 5 event-check tests override this with null (lookup failed) or
+    // a list of conflicting events.
+    upcomingEvents: [],
     liquidityMetrics: null,
     earningsIvHistory: null,
     ...overrides,
@@ -680,6 +684,94 @@ describe("Filter 5 — Earnings Verified 2 Weeks Out: independent re-verificatio
   });
 });
 
+describe("Filter 5 — earnings must be the only upcoming event", () => {
+  it("fails when an ex-dividend date falls between today and earnings, naming the event", () => {
+    const stock = baseStock({
+      symbol: "DIVCO",
+      nextEarningsDate: dateFromFixed(16),
+      upcomingEvents: [{ type: "dividend", date: dateFromFixed(10) }],
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "dividend before earnings must fail");
+    assert.equal(result.bypassed, false, "a real conflict is a fail, not a bypass");
+    assert.ok(
+      result.explanation.includes("ex-dividend date") && result.explanation.includes(dateFromFixed(10)),
+      `explanation must name the conflicting event and its date (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when a stock split falls between today and earnings", () => {
+    const stock = baseStock({
+      symbol: "SPLITCO",
+      nextEarningsDate: dateFromFixed(15),
+      upcomingEvents: [{ type: "split", date: dateFromFixed(5) }],
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "split before earnings must fail");
+    assert.ok(
+      result.explanation.includes("stock split") && result.explanation.includes(dateFromFixed(5)),
+      `explanation must name the split and its date (got: "${result.explanation}")`
+    );
+  });
+
+  it("passes when earnings is in window and the only event list is empty", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16), upcomingEvents: [] });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, true, "clean event calendar + in-window earnings must pass");
+    assert.ok(
+      result.explanation.toLowerCase().includes("only"),
+      `explanation must state earnings is the only upcoming event (got: "${result.explanation}")`
+    );
+  });
+
+  it("ignores events dated after the earnings date (post-earnings dividend is fine)", () => {
+    const stock = baseStock({
+      nextEarningsDate: dateFromFixed(15),
+      upcomingEvents: [{ type: "dividend", date: dateFromFixed(25) }],
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, true, "an event after earnings must not disqualify the stock");
+  });
+
+  it("is bypassed (not passed) when event data is unavailable (upcomingEvents=null)", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16), upcomingEvents: null });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "unavailable event data must not silently pass");
+    assert.equal(result.bypassed, true, "unavailable event data must bypass");
+    assert.ok(
+      result.explanation.toLowerCase().includes("unavailable") ||
+        result.explanation.toLowerCase().includes("could not run"),
+      `explanation must say the event check couldn't run (got: "${result.explanation}")`
+    );
+  });
+
+  it("is bypassed when the provider predates the field (upcomingEvents undefined)", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16) });
+    delete (stock as Partial<typeof stock>).upcomingEvents;
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false);
+    assert.equal(result.bypassed, true, "missing field must be treated like unavailable data");
+  });
+
+  it("window failure takes precedence: out-of-window earnings fails even with a clean calendar", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(19), upcomingEvents: [] });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false);
+    assert.equal(result.bypassed, false);
+  });
+
+  it("filter description mentions the only-upcoming-event rule", () => {
+    const defs = getFilterDefinitions();
+    const def = defs.find((d) => d.name.includes("Filter 5"));
+    assert.ok(def, "Filter 5 definition must exist");
+    const text = (def!.description + " " + def!.threshold).toLowerCase();
+    assert.ok(
+      text.includes("dividend") && text.includes("split"),
+      `Filter 5 description/threshold must mention dividends and splits (got: "${def!.description}" / "${def!.threshold}")`
+    );
+  });
+});
+
 // ===========================================================================
 // Filter 6 — Double Calendar Structure
 // ===========================================================================
@@ -1218,6 +1310,7 @@ function fullyQualifiedStock(): StockQuote {
     openInterest: 800_000,
     sector: "tech",
     nextEarningsDate: dateFromFixed(16),
+    upcomingEvents: [], // events lookup succeeded, calendar clean → F5 event check passes
     liquidityMetrics: {
       hasWeeklyOptions: true,
       hasPennyIncrements: true,
