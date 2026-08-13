@@ -11,7 +11,7 @@ set -euo pipefail
 echo "=== Installing workspace dependencies ==="
 pnpm install --frozen-lockfile
 
-echo "=== Applying pending database migrations ==="
-pnpm --filter @workspace/db run migrate 2>/dev/null || true
+echo "=== Applying pending database schema changes ==="
+pnpm --filter @workspace/db run push
 
 echo "=== Post-merge setup complete ==="

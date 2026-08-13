@@ -16,32 +16,59 @@ import {
   useLocation,
   Router as WouterRouter,
 } from 'wouter';
-import { getGetAuthStatusQueryKey } from '@workspace/api-client-react';
+import { getGetAuthStatusQueryKey, ApiError } from '@workspace/api-client-react';
+
+/**
+ * Redirect to the Clerk sign-in page when any API call returns HTTP 401.
+ *
+ * A 401 mid-session means the Clerk JWT has expired and the automatic
+ * refresh failed (e.g. the user was offline or the refresh token itself
+ * lapsed).  Rather than silently failing or showing an empty screen, we
+ * send the user to sign-in so they can re-authenticate.
+ *
+ * This runs outside the React component tree, so we use window.location
+ * instead of a hook.  The base path is read at call time from the env var
+ * so it works in both root-mounted and sub-path-mounted deployments.
+ */
+function redirectToSignIn(): void {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+  window.location.replace(`${base}/sign-in`);
+}
 
 /**
  * Global React Query error handler.
- * When any query or mutation returns a 401, the Clerk session is gone or
- * the server has rejected it.  Force an immediate re-fetch of /auth/status
- * so useRequireAuth can redirect to /sign-in within one polling cycle
- * rather than waiting up to 5 minutes.
+ * When any query returns a 401, the Clerk session is gone or the server has
+ * rejected it.  We do two things:
+ *   1. Immediately redirect to /sign-in so the user gets a clear prompt.
+ *   2. Invalidate /auth/status so useRequireAuth reflects the change if the
+ *      redirect is somehow delayed or blocked (e.g. an ErrorBoundary catches
+ *      the navigation).
  */
-function isApiError(err: unknown): err is { status: number } {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'status' in err &&
-    typeof (err as Record<string, unknown>).status === 'number'
-  );
-}
-
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error) => {
-      if (isApiError(error) && error.status === 401) {
+    onError(error) {
+      if (error instanceof ApiError && error.status === 401) {
+        // Invalidate auth status so useRequireAuth can redirect via the hook
         queryClient.invalidateQueries({ queryKey: getGetAuthStatusQueryKey() });
+        // Also do a hard redirect — more reliable than waiting for the next
+        // polling cycle when the token is definitively expired.
+        redirectToSignIn();
       }
     },
   }),
+  defaultOptions: {
+    queries: {
+      /**
+       * Never retry a 401 — the token is expired; retrying will just
+       * produce the same response.  Redirecting to sign-in immediately
+       * gives the user a clear prompt.
+       */
+      retry(failureCount, error) {
+        if (error instanceof ApiError && error.status === 401) return false;
+        return failureCount < 3;
+      },
+    },
+  },
 });
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');

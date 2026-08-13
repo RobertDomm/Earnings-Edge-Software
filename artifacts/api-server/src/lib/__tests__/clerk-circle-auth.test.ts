@@ -29,6 +29,11 @@
  *     16. getUserInfo throws                             → { authenticated: true, authorized: false }
  *     17. Non-member status body does not expose email   → user field absent/undefined
  *
+ *   Layer 4 — Clerk JWT token expiry (requireAuth middleware, expiry-specific)
+ *     18. Expired JWT → getAuth returns userId: null     → 401 (not silent, not 500)
+ *     19. Expired JWT 401 body has an error field        → no leak of session detail
+ *     20. Expired JWT never reaches the protected handler
+ *
  * Run with:
  *   pnpm --filter @workspace/api-server run test
  */
@@ -150,27 +155,32 @@ function stopServer(s: Server): Promise<void> {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Layer 1 — getUserAuthInfo (circle-membership.ts)
+//
+// Each test passes its Circle API mock as `fetchImpl` directly to
+// createGetUserAuthInfo, rather than mutating globalThis.fetch.
+// This prevents inter-suite races when Node's test runner executes
+// describe blocks concurrently.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("getUserAuthInfo — Circle returns empty array (non-member)", () => {
   let restore: () => void;
-  let restoreFetch: () => void;
-
-  before(() => {
-    restore = withCircleEnv();
-    restoreFetch = saveFetch();
-    globalThis.fetch = makeFetchMock(200, []);   // empty array → not a member
-  });
-  after(() => { restoreFetch(); restore(); });
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
 
   it("returns authorized: false", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => NON_MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => NON_MEMBER_CLERK_USER,
+      makeFetchMock(200, []),  // empty array → not a member
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false, "Non-member must not be authorized");
   });
 
   it("returns the correct email", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => NON_MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => NON_MEMBER_CLERK_USER,
+      makeFetchMock(200, []),
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.email, NON_MEMBER_EMAIL);
   });
@@ -178,17 +188,14 @@ describe("getUserAuthInfo — Circle returns empty array (non-member)", () => {
 
 describe("getUserAuthInfo — Circle returns 404 (non-member)", () => {
   let restore: () => void;
-  let restoreFetch: () => void;
-
-  before(() => {
-    restore = withCircleEnv();
-    restoreFetch = saveFetch();
-    globalThis.fetch = makeFetchMock(404, { message: "Not Found" });
-  });
-  after(() => { restoreFetch(); restore(); });
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
 
   it("returns authorized: false", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => NON_MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => NON_MEMBER_CLERK_USER,
+      makeFetchMock(404, { message: "Not Found" }),
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false);
   });
@@ -196,23 +203,23 @@ describe("getUserAuthInfo — Circle returns 404 (non-member)", () => {
 
 describe("getUserAuthInfo — Circle returns member record (member)", () => {
   let restore: () => void;
-  let restoreFetch: () => void;
-
-  before(() => {
-    restore = withCircleEnv();
-    restoreFetch = saveFetch();
-    globalThis.fetch = makeFetchMock(200, [{ email: MEMBER_EMAIL, community_member_id: 42 }]);
-  });
-  after(() => { restoreFetch(); restore(); });
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
 
   it("returns authorized: true", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => MEMBER_CLERK_USER,
+      makeFetchMock(200, [{ email: MEMBER_EMAIL, community_member_id: 42 }]),
+    );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
     assert.equal(result.authorized, true, "Confirmed member must be authorized");
   });
 
   it("returns the correct email", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => MEMBER_CLERK_USER,
+      makeFetchMock(200, [{ email: MEMBER_EMAIL, community_member_id: 42 }]),
+    );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
     assert.equal(result.email, MEMBER_EMAIL);
   });
@@ -220,12 +227,16 @@ describe("getUserAuthInfo — Circle returns member record (member)", () => {
 
 describe("getUserAuthInfo — Circle env vars missing (fail-closed)", () => {
   let restore: () => void;
-
   before(() => { restore = withoutCircleEnv(); });
   after(() => { restore(); });
 
   it("returns authorized: false when env vars are absent", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => NON_MEMBER_CLERK_USER);
+    // fetchImpl is never reached when env vars are missing, but we still
+    // inject a neutral mock to avoid any globalThis.fetch dependency.
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => NON_MEMBER_CLERK_USER,
+      makeFetchMock(200, []),
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false, "Missing env vars must deny access");
   });
@@ -233,17 +244,14 @@ describe("getUserAuthInfo — Circle env vars missing (fail-closed)", () => {
 
 describe("getUserAuthInfo — Circle API responds non-2xx (fail-closed)", () => {
   let restore: () => void;
-  let restoreFetch: () => void;
-
-  before(() => {
-    restore = withCircleEnv();
-    restoreFetch = saveFetch();
-    globalThis.fetch = makeFetchMock(500, { error: "Internal Server Error" });
-  });
-  after(() => { restoreFetch(); restore(); });
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
 
   it("returns authorized: false on 5xx", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => NON_MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => NON_MEMBER_CLERK_USER,
+      makeFetchMock(500, { error: "Internal Server Error" }),
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false, "5xx from Circle must deny access");
   });
@@ -251,17 +259,14 @@ describe("getUserAuthInfo — Circle API responds non-2xx (fail-closed)", () => 
 
 describe("getUserAuthInfo — Circle API throws network error (fail-closed)", () => {
   let restore: () => void;
-  let restoreFetch: () => void;
-
-  before(() => {
-    restore = withCircleEnv();
-    restoreFetch = saveFetch();
-    globalThis.fetch = makeThrowingFetchMock();
-  });
-  after(() => { restoreFetch(); restore(); });
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
 
   it("returns authorized: false when fetch throws", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => NON_MEMBER_CLERK_USER);
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => NON_MEMBER_CLERK_USER,
+      makeThrowingFetchMock(),
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false, "Network error must deny access");
   });
@@ -280,15 +285,14 @@ describe("getUserAuthInfo — Clerk user lookup fails (fail-closed)", () => {
 
 describe("getUserAuthInfo — Clerk user has no email (fail-closed)", () => {
   let restore: () => void;
-
   before(() => { restore = withCircleEnv(); });
   after(() => { restore(); });
 
   it("returns authorized: false when the Clerk user has no email addresses", async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(async () => ({
-      primaryEmailAddressId: null,
-      emailAddresses: [],
-    }));
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => ({ primaryEmailAddressId: null, emailAddresses: [] }),
+      makeFetchMock(200, []),
+    );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false, "User with no email must be denied");
   });
@@ -616,6 +620,78 @@ describe("GET /auth/status — getUserInfo throws (fail-closed)", () => {
     assert.ok(
       !text.includes("Internal auth check failure"),
       "Internal error must not leak to the response body",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Layer 4 — Clerk JWT token expiry
+//
+// When a Clerk JWT expires mid-session and the client-side auto-refresh fails
+// (e.g. the user is offline or the refresh token has itself expired), Clerk's
+// server-side SDK sets userId to null.  The requireAuth middleware must return
+// HTTP 401 immediately — not a silent empty response and not a 500 — so the
+// frontend can detect the 401 and send the user to the sign-in page.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("requireAuth middleware — expired/invalid Clerk JWT (userId is null)", () => {
+  /**
+   * This scenario is identical to "unauthenticated request" from the Clerk
+   * middleware's perspective: getAuth(req).userId is null whether the request
+   * has no session at all or whether the JWT is present but has expired and
+   * the refresh failed.  The middleware must treat both the same way.
+   */
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+
+    // Simulate what clerkMiddleware sets when a token is expired/unverifiable:
+    // getAuth() returns { userId: null }.
+    const mw = createRequireAuth(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null), // null userId — token present but expired / invalid
+    );
+    app.get("/protected", mw, (_req, res) => res.json({ ok: true }));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 401 — not a silent 200 or a 500", async () => {
+    const res = await fetch(`${ts.url}/protected`);
+    assert.equal(
+      res.status,
+      401,
+      `Expired-token request must receive 401, got ${res.status}`,
+    );
+  });
+
+  it("response body contains an error field so the caller knows what failed", async () => {
+    const res = await fetch(`${ts.url}/protected`);
+    const body = (await res.json()) as { error: string };
+    assert.ok(
+      typeof body.error === "string" && body.error.length > 0,
+      `401 body must have a non-empty error string (got: ${JSON.stringify(body)})`,
+    );
+  });
+
+  it("does NOT reach the protected route handler", async () => {
+    const res = await fetch(`${ts.url}/protected`);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.ok(
+      body["ok"] !== true,
+      "Route handler must not execute when the Clerk token is expired",
+    );
+  });
+
+  it("response body does not leak internal session detail", async () => {
+    const res = await fetch(`${ts.url}/protected`);
+    const text = await res.text();
+    // Must not expose any token, userId, or internal stack trace
+    assert.ok(
+      !text.includes("userId") && !text.includes("stack"),
+      `401 body must not expose internal session detail (got: ${text.slice(0, 200)})`,
     );
   });
 });

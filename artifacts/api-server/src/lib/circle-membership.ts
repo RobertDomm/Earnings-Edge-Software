@@ -33,7 +33,15 @@ export interface ClerkUserRecord {
   emailAddresses: Array<{ id: string; emailAddress: string }>;
 }
 
-async function checkCircleMembership(email: string): Promise<boolean> {
+/**
+ * Checks Circle Space Group membership via the Admin v2 API.
+ * Accepts an optional `fetchImpl` so tests can inject a mock without
+ * mutating the global `fetch` (which would cause inter-suite races).
+ */
+async function checkCircleMembership(
+  email: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<boolean> {
   const spaceGroupId = process.env.CIRCLE_REQUIRED_SPACE_GROUP_ID;
   const apiToken = process.env.CIRCLE_API_TOKEN;
 
@@ -48,7 +56,7 @@ async function checkCircleMembership(email: string): Promise<boolean> {
     `&space_group_id=${encodeURIComponent(spaceGroupId)}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchImpl(url, {
       headers: {
         Authorization: `Token ${apiToken}`,
         Accept: "application/json",
@@ -57,8 +65,17 @@ async function checkCircleMembership(email: string): Promise<boolean> {
     });
 
     if (res.status === 200) {
-      logger.debug({ email, spaceGroupId }, "Circle membership confirmed");
-      return true;
+      // The Circle Admin v2 API returns an array of member records on 200.
+      // A non-empty array = member found; an empty array = not a member.
+      // We parse the body and only authorize when we see at least one record,
+      // so a 200 with [] is treated as non-member (fail-closed).
+      const body = await res.json().catch(() => null);
+      if (Array.isArray(body) && body.length > 0) {
+        logger.debug({ email, spaceGroupId }, "Circle membership confirmed");
+        return true;
+      }
+      logger.debug({ email, spaceGroupId }, "Circle membership denied — 200 but no member records returned");
+      return false;
     }
 
     if (res.status === 404) {
@@ -77,14 +94,16 @@ async function checkCircleMembership(email: string): Promise<boolean> {
 }
 
 /**
- * Factory that builds a getUserAuthInfo function with an injectable Clerk
- * user-fetcher.  Use this in tests to avoid real Clerk API calls.
+ * Factory that builds a getUserAuthInfo function with injectable dependencies:
+ *   - `getClerkUser`: resolves a Clerk userId → user record (email, etc.)
+ *   - `fetchImpl`: used for Circle API calls (injectable for tests to avoid
+ *     mutating globalThis.fetch across concurrent suites)
  *
- * Production code calls the pre-built `getUserAuthInfo` export below, which
- * uses the real `clerkClient.users.getUser`.
+ * Production code uses the pre-built `getUserAuthInfo` export below.
  */
 export function createGetUserAuthInfo(
   getClerkUser: GetClerkUser,
+  fetchImpl: typeof fetch = globalThis.fetch,
 ): (userId: string) => Promise<{ email: string; authorized: boolean }> {
   const localCache = new Map<string, UserAuthCache>();
 
@@ -114,8 +133,8 @@ export function createGetUserAuthInfo(
       return { email: "", authorized: false };
     }
 
-    // Check Circle Space Group membership
-    const authorized = await checkCircleMembership(email);
+    // Check Circle Space Group membership (uses the injected fetchImpl)
+    const authorized = await checkCircleMembership(email, fetchImpl);
     localCache.set(userId, { email, authorized, cachedAt: now });
     return { email, authorized };
   };
