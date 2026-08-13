@@ -12,7 +12,7 @@
  *     0c. Missing email body field → HTTP 400
  *     0d. Non-string email body field → HTTP 400
  *     0e. Email is trimmed + lowercased before the membership check
- *     0f. checkMembership throws → HTTP 500 (does not crash the server)
+ *     0f. checkMembership throws → HTTP 503 with circle_unavailable (Circle outage ≠ membership denial)
  *     0g. Non-member response never exposes email in the body
  *
  *   Layer 1 — getUserAuthInfo (circle-membership.ts)
@@ -52,7 +52,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import express from "express";
 
-import { createGetUserAuthInfo } from "../circle-membership.js";
+import { createGetUserAuthInfo, checkEmailMembership } from "../circle-membership.js";
 import { createRequireAuth } from "../../middlewares/require-auth.js";
 import { createAuthStatusRouter } from "../../routes/auth.js";
 import { createRateLimiter } from "../rate-limiter.js";
@@ -129,6 +129,15 @@ function makeThrowingFetchMock(): typeof globalThis.fetch {
   };
 }
 
+/**
+ * A no-op rate limiter that always calls next().
+ * Use this in describe blocks that test Circle API error paths — those blocks
+ * share the module-level defaultPreflightLimiter singleton, which can be
+ * exhausted by earlier suites (all running from 127.0.0.1), causing spurious
+ * 429s that mask the 503 or 200 we are actually asserting.
+ */
+const noopLimiter: import("express").RequestHandler = (_req, _res, next) => next();
+
 /** Saves and restores globalThis.fetch around a test. */
 function saveFetch(): () => void {
   const original = globalThis.fetch;
@@ -186,6 +195,7 @@ describe("POST /auth/preflight — non-member email is denied before Clerk sends
       async () => ({ email: "", authorized: false }),
       makeGetAuth(null),
       async (_email: string) => false,
+      noopLimiter,
     ));
     ts = await startServer(app);
   });
@@ -239,6 +249,7 @@ describe("POST /auth/preflight — member email is approved", () => {
       async () => ({ email: MEMBER_EMAIL, authorized: true }),
       makeGetAuth(null),
       async (_email: string) => true,
+      noopLimiter,
     ));
     ts = await startServer(app);
   });
@@ -278,6 +289,7 @@ describe("POST /auth/preflight — missing email field returns 400", () => {
       async () => ({ email: "", authorized: false }),
       makeGetAuth(null),
       async (_email: string) => false,
+      noopLimiter,
     ));
     ts = await startServer(app);
   });
@@ -314,6 +326,7 @@ describe("POST /auth/preflight — non-string email field returns 400", () => {
       async () => ({ email: "", authorized: false }),
       makeGetAuth(null),
       async (_email: string) => false,
+      noopLimiter,
     ));
     ts = await startServer(app);
   });
@@ -344,6 +357,7 @@ describe("POST /auth/preflight — email is normalised before the membership che
         capturedEmail = email;
         return false;
       },
+      noopLimiter,
     ));
     ts = await startServer(app);
   });
@@ -373,6 +387,7 @@ describe("POST /auth/preflight — checkMembership throws returns 503 (Circle un
       async () => ({ email: "", authorized: false }),
       makeGetAuth(null),
       async (_email: string) => { throw new Error("Circle API unavailable"); },
+      noopLimiter,
     ));
     ts = await startServer(app);
   });
@@ -1135,5 +1150,298 @@ describe("POST /auth/preflight — rate limiter: different IPs have independent 
       429,
       `ip-b must have its own fresh quota and must not be rate-limited (got ${res.status})`,
     );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// checkEmailMembership unit tests — lib level
+//
+// These tests exercise the actual checkEmailMembership function from
+// circle-membership.ts (the function the preflight route calls) rather than
+// injecting a stub at the router level.  This confirms that the throw
+// propagates correctly from the fetch layer all the way up to the caller,
+// so the preflight handler can catch it and return 503.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("checkEmailMembership — network timeout throws so the caller can return 503", () => {
+  let restore: () => void;
+
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
+
+  it("throws when the fetch call raises a network error (AbortError / connection refused)", async () => {
+    const throwingFetch = makeThrowingFetchMock();
+    await assert.rejects(
+      () => checkEmailMembership(MEMBER_EMAIL, throwingFetch),
+      /Network timeout/,
+      "checkEmailMembership must propagate the network error so the caller can return 503",
+    );
+  });
+
+  it("does NOT return false silently on network failure — it always throws", async () => {
+    const throwingFetch = makeThrowingFetchMock();
+    let threw = false;
+    try {
+      await checkEmailMembership(MEMBER_EMAIL, throwingFetch);
+    } catch {
+      threw = true;
+    }
+    assert.ok(
+      threw,
+      "checkEmailMembership must throw on network failure (not swallow it and return false)",
+    );
+  });
+});
+
+describe("checkEmailMembership — Circle returns 500: throws so the caller can return 503", () => {
+  let restore: () => void;
+
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
+
+  it("throws when Circle responds with HTTP 500", async () => {
+    const errorFetch = makeFetchMock(500, { message: "Internal Server Error" });
+    await assert.rejects(
+      () => checkEmailMembership(MEMBER_EMAIL, errorFetch),
+      (err: unknown) => err instanceof Error && /unexpected status 500/.test((err as Error).message),
+      "checkEmailMembership must throw on a 5xx from Circle so the caller can distinguish it from a denial",
+    );
+  });
+
+  it("does NOT return false silently on a 5xx — it always throws", async () => {
+    const errorFetch = makeFetchMock(500, { message: "Internal Server Error" });
+    let threw = false;
+    try {
+      await checkEmailMembership(MEMBER_EMAIL, errorFetch);
+    } catch {
+      threw = true;
+    }
+    assert.ok(
+      threw,
+      "checkEmailMembership must throw on 5xx (not return false), so the preflight route can return 503",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// End-to-end: preflight route wired with the real checkEmailMembership + fetch mock
+//
+// These tests wire the router with a thin wrapper around the real
+// checkEmailMembership so the full call chain (router → checkEmailMembership →
+// checkCircleMembership → fetch mock) is exercised.  This is the closest
+// simulation of a real Circle outage without hitting the live API.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("POST /auth/preflight — Circle network timeout via real checkEmailMembership: returns 503 not 403", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    // Inject the real checkEmailMembership wired to a throwing fetch.
+    // This exercises the full path: router → checkEmailMembership → throw → 503.
+    const throwingFetch = makeThrowingFetchMock();
+    const checkMembership = (email: string) => checkEmailMembership(email, throwingFetch);
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      checkMembership,
+      noopLimiter,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 503 (not 200 or 403) when Circle is unreachable", async () => {
+    const restore = withCircleEnv();
+    try {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: MEMBER_EMAIL }),
+      });
+      assert.equal(
+        res.status,
+        503,
+        `Expected 503 when Circle is unreachable, got ${res.status} — frontend must show 'try again', not 'not authorized'`,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("response body contains error: circle_unavailable (not authorized: false)", async () => {
+    const restore = withCircleEnv();
+    try {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: MEMBER_EMAIL }),
+      });
+      const body = (await res.json()) as { error?: string; authorized?: boolean };
+      assert.equal(
+        body.error,
+        "circle_unavailable",
+        `Body must carry error:'circle_unavailable' (got: ${JSON.stringify(body)})`,
+      );
+      assert.ok(
+        !("authorized" in body),
+        "Body must NOT have an 'authorized' field when Circle is unreachable — that field is only for membership decisions",
+      );
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("POST /auth/preflight — Circle returns 500 via real checkEmailMembership: returns 503 not 403", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    const errorFetch = makeFetchMock(500, { message: "Internal Server Error" });
+    const checkMembership = (email: string) => checkEmailMembership(email, errorFetch);
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      checkMembership,
+      noopLimiter,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 503 when Circle itself returns 500", async () => {
+    const restore = withCircleEnv();
+    try {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: MEMBER_EMAIL }),
+      });
+      assert.equal(
+        res.status,
+        503,
+        `Expected 503 when Circle returns 500, got ${res.status}`,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("body error is circle_unavailable when Circle returns 500", async () => {
+    const restore = withCircleEnv();
+    try {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: MEMBER_EMAIL }),
+      });
+      const body = (await res.json()) as { error?: string };
+      assert.equal(body.error, "circle_unavailable");
+    } finally {
+      restore();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Regression: genuine non-member still gets authorized:false — not 503
+//
+// Confirms there is no regression where a reachable-but-denying Circle API
+// is confused with an unreachable Circle API.  A non-member must always see
+// HTTP 200 / authorized:false so the frontend shows "email not authorized",
+// never "try again".
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("POST /auth/preflight — regression: genuine non-member gets 200/authorized:false, not 503", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    // Circle responds 404 — the canonical "not a member" response.
+    const notMemberFetch = makeFetchMock(404, { message: "Not Found" });
+    const checkMembership = (email: string) => checkEmailMembership(email, notMemberFetch);
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      checkMembership,
+      noopLimiter,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 200 (not 503) for a non-member when Circle is reachable", async () => {
+    const restore = withCircleEnv();
+    try {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+      });
+      assert.equal(
+        res.status,
+        200,
+        `Non-member with reachable Circle must get 200, got ${res.status} — a 503 would wrongly tell them to 'try again'`,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("body has authorized:false (not error:circle_unavailable) for a genuine non-member", async () => {
+    const restore = withCircleEnv();
+    try {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+      });
+      const body = (await res.json()) as { authorized?: boolean; error?: string };
+      assert.equal(
+        body.authorized,
+        false,
+        "Non-member must see authorized:false — not an error code that implies a temporary failure",
+      );
+      assert.ok(
+        !("error" in body) || body.error !== "circle_unavailable",
+        "Non-member response must not carry error:'circle_unavailable'",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("a 200/authorized:false response with an empty-array Circle reply is also a non-member (not 503)", async () => {
+    // Circle 200 + [] is the other 'not a member' variant (as opposed to 404).
+    const restore = withCircleEnv();
+    const emptyArrayFetch = makeFetchMock(200, []);
+    const checkMembership = (email: string) => checkEmailMembership(email, emptyArrayFetch);
+
+    const app2 = express();
+    app2.use(express.json());
+    app2.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      checkMembership,
+      noopLimiter,
+    ));
+    const ts2 = await startServer(app2);
+    try {
+      const res = await fetch(`${ts2.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { authorized: boolean };
+      assert.equal(body.authorized, false, "Empty-array Circle reply must produce authorized:false, not 503");
+    } finally {
+      restore();
+      await stopServer(ts2.server);
+    }
   });
 });
