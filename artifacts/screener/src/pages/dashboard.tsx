@@ -145,7 +145,7 @@ export default function Dashboard() {
 
       <header className="border-b border-border bg-card/80 backdrop-blur-md z-10 sticky top-0 h-14 flex items-center justify-between px-6">
         <div className="flex items-center gap-1.5">
-          <img src="/edgefinder-logo.png" alt="Earnings Edge Software" className="h-10 w-10 object-contain" />
+          <img src="/edgefinder-logo-white.png" alt="Earnings Edge Software" className="h-10 w-10 object-contain" />
           <h1 className="font-mono font-bold tracking-widest text-sm uppercase text-foreground">
             Earnings Edge Software{" "}
             <span className="text-muted-foreground opacity-50 ml-2">v0.1.0</span>
