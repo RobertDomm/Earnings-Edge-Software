@@ -724,6 +724,25 @@ describe("Filter 5 — earnings must be the only upcoming event", () => {
     );
   });
 
+  it("fails when an ex-dividend date lands exactly today (boundary inclusive)", () => {
+    const stock = baseStock({
+      nextEarningsDate: dateFromFixed(16),
+      upcomingEvents: [{ type: "dividend", date: dateFromFixed(0) }],
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "an event dated today must still disqualify the stock");
+    assert.equal(result.bypassed, false);
+  });
+
+  it("fails when a split lands exactly on the earnings date (boundary inclusive)", () => {
+    const stock = baseStock({
+      nextEarningsDate: dateFromFixed(15),
+      upcomingEvents: [{ type: "split", date: dateFromFixed(15) }],
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "an event on the earnings date itself must disqualify the stock");
+  });
+
   it("ignores events dated after the earnings date (post-earnings dividend is fine)", () => {
     const stock = baseStock({
       nextEarningsDate: dateFromFixed(15),

@@ -233,6 +233,9 @@ import {
   fetchPolygonEarningsData,
   fetchPolygonEarningsDataCached,
   clearPolygonEarningsCache,
+  fetchPolygonUpcomingEvents,
+  fetchPolygonUpcomingEventsCached,
+  clearPolygonEventsCache,
   ThetaDataProvider,
 } from "../market-data.js";
 import type { StockQuote } from "../market-data.js";
@@ -706,6 +709,76 @@ describe("fetchPolygonEarningsDataCached — per-ticker 24h cache", () => {
     } finally {
       globalThis.fetch = originalFetch;
       clearPolygonEarningsCache();
+    }
+  });
+
+  it("upcoming-events: merges dividends and splits sorted by date; [] when none", async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/v3/reference/dividends")) {
+        return makeJsonResponse({ results: [{ ex_dividend_date: "2026-09-10" }] });
+      }
+      if (url.includes("/v3/reference/splits")) {
+        return makeJsonResponse({ results: [{ execution_date: "2026-09-01" }] });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+    try {
+      const events = await fetchPolygonUpcomingEvents("stub-key", "META", { retryBaseMs: 1 });
+      assert.deepEqual(events, [
+        { type: "split", date: "2026-09-01" },
+        { type: "dividend", date: "2026-09-10" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("upcoming-events: returns null and logs a classified warning on failure; failures not cached", async () => {
+    clearPolygonEventsCache();
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+    originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return makeJsonResponse({ error: "boom" }, 500); };
+    try {
+      const events = await fetchPolygonUpcomingEventsCached("stub-key", "META", { retries: 0, retryBaseMs: 1 });
+      assert.equal(events, null, "failed lookup must return null (→ Filter 5 bypasses)");
+      assert.ok(warnings.some((w) => w.includes("META") && w.includes("server error")), `warning must name ticker and classify (got: ${warnings.join(" | ")})`);
+      const callsAfterFirst = calls;
+      await fetchPolygonUpcomingEventsCached("stub-key", "META", { retries: 0, retryBaseMs: 1 });
+      assert.ok(calls > callsAfterFirst, "failures must not be cached");
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.warn = originalWarn;
+      clearPolygonEventsCache();
+    }
+  });
+
+  it("upcoming-events: second lookup for the same ticker is served from the 24h cache", async () => {
+    clearPolygonEventsCache();
+    originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      calls++;
+      if (url.includes("/v3/reference/dividends") || url.includes("/v3/reference/splits")) {
+        return makeJsonResponse({ results: [] });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+    try {
+      const first = await fetchPolygonUpcomingEventsCached("stub-key", "META", { retryBaseMs: 1 });
+      assert.deepEqual(first, [], "successful empty lookup returns []");
+      const callsAfterFirst = calls;
+      const second = await fetchPolygonUpcomingEventsCached("stub-key", "META", { retryBaseMs: 1 });
+      assert.equal(calls, callsAfterFirst, "second lookup must not hit HTTP");
+      assert.deepEqual(second, []);
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearPolygonEventsCache();
     }
   });
 

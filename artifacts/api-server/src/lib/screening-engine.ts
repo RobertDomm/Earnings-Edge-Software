@@ -431,11 +431,12 @@ const filter5: IFilterRule = {
       };
     }
 
-    // Conflicting events: any dividend/split dated after today and on or
-    // before the earnings date competes with earnings as a catalyst.
+    // Conflicting events: any dividend/split dated from today (inclusive —
+    // an event landing today still muddies the run-up window) through the
+    // earnings date competes with earnings as a catalyst.
     const earningsDateStr = stock.nextEarningsDate;
     const todayStr = `${_today.getFullYear()}-${String(_today.getMonth() + 1).padStart(2, "0")}-${String(_today.getDate()).padStart(2, "0")}`;
-    const conflicts = events.filter((e) => e.date > todayStr && e.date <= earningsDateStr);
+    const conflicts = events.filter((e) => e.date >= todayStr && e.date <= earningsDateStr);
 
     if (conflicts.length > 0) {
       const detail = conflicts
