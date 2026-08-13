@@ -146,7 +146,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-1.5">
           <img src="/edgefinder-logo.png" alt="EdgeFinder" className="h-10 w-10 object-contain" />
           <h1 className="font-mono font-bold tracking-widest text-sm uppercase text-foreground">
-            EdgeFinder{" "}
+            EE Software{" "}
             <span className="text-muted-foreground opacity-50 ml-2">v0.1.0</span>
           </h1>
         </div>
