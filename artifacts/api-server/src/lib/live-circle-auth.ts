@@ -87,17 +87,24 @@ export class LiveCircleAuthService implements ICircleAuthService {
     // 1. Exchange authorization code for access token
     let tokenData: CircleTokenResponse;
     try {
+      // Circle's OAuth token endpoint requires standard form-encoded parameters
+      // (application/x-www-form-urlencoded), not JSON.  Sending a JSON body
+      // causes a 400 / invalid_grant error even with correct credentials.
+      const tokenParams = new URLSearchParams({
+        client_id:     this.clientId,
+        client_secret: this.clientSecret,
+        code,
+        grant_type:    "authorization_code",
+      });
+      if (redirectUri) tokenParams.set("redirect_uri", redirectUri);
+
       const tokenRes = await fetch("https://app.circle.so/oauth/token", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({
-          client_id:     this.clientId,
-          client_secret: this.clientSecret,
-          code,
-          grant_type:    "authorization_code",
-          // redirect_uri must match the one used in the initial authorize request
-          ...(redirectUri ? { redirect_uri: redirectUri } : {}),
-        }),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept":        "application/json",
+        },
+        body:   tokenParams.toString(),
         signal: AbortSignal.timeout(15_000),
       });
 
