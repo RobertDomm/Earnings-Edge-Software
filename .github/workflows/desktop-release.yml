@@ -6,16 +6,106 @@ on:
     paths:
       - 'artifacts/desktop/**'
   workflow_dispatch:
+    inputs:
+      version_bump:
+        description: >
+          Version bump to apply before building. Required when shipping a new
+          release — without a bump, electron-updater sees no version change
+          and members never receive the update prompt.
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
 
 jobs:
+  # ── Prepare ────────────────────────────────────────────────────────────────
+  # Computes the release version (bumping if requested), guards against
+  # re-publishing the same version, and commits the bump back to the repo
+  # so package.json stays in sync.
+  prepare:
+    name: Prepare release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Use a PAT or the default token so git push works.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute version
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./artifacts/desktop/package.json').version")
+          BUMP="${{ inputs.version_bump }}"
+
+          if [[ "$BUMP" == "patch" || "$BUMP" == "minor" || "$BUMP" == "major" ]]; then
+            VERSION=$(node -e "
+              const [maj, min, pat] = '$CURRENT'.split('.').map(Number);
+              if ('$BUMP' === 'major') process.stdout.write((maj+1)+'.0.0');
+              else if ('$BUMP' === 'minor') process.stdout.write(maj+'.'+(min+1)+'.0');
+              else process.stdout.write(maj+'.'+min+'.'+(pat+1));
+            ")
+            echo "Bumping $CURRENT → $VERSION"
+
+            # Write the new version into package.json and commit it back so
+            # the repo stays in sync with whatever gets built and released.
+            node -e "
+              const fs = require('fs');
+              const pkg = JSON.parse(fs.readFileSync('./artifacts/desktop/package.json', 'utf8'));
+              pkg.version = '$VERSION';
+              fs.writeFileSync('./artifacts/desktop/package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git add artifacts/desktop/package.json
+            # [skip ci] prevents this commit from re-triggering the workflow.
+            git commit -m "chore: bump desktop version to $VERSION [skip ci]"
+            git push
+          else
+            VERSION="$CURRENT"
+            echo "Using existing version: $VERSION"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Guard against re-shipping the same version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Download latest.yml from the current published release.
+          # If it reports the same version we're about to build, fail loudly
+          # so the engineer knows to bump before shipping.
+          PUBLISHED=$(curl -sf \
+            "https://github.com/${{ github.repository }}/releases/latest/download/latest.yml" \
+            | grep '^version:' | awk '{print $2}' \
+            || echo "none")
+
+          if [[ "$PUBLISHED" == "$VERSION" ]]; then
+            echo "::error::Version $VERSION is already the published release."
+            echo "::error::Run this workflow again with a version_bump input (patch / minor / major), or manually edit artifacts/desktop/package.json before pushing."
+            exit 1
+          fi
+
+          echo "Version guard passed — building $VERSION (published: $PUBLISHED)"
+
+  # ── macOS ──────────────────────────────────────────────────────────────────
   build-mac:
     name: macOS (.dmg)
+    needs: [prepare]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Fetch after the prepare commit so we get the bumped package.json.
+          ref: ${{ github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -41,16 +131,14 @@ jobs:
       - name: Build macOS DMG
         working-directory: artifacts/desktop
         run: |
-          # Derive owner and repo from the Actions context so the auto-updater
-          # URL baked into the binary always matches the real GitHub release feed,
-          # regardless of what is hardcoded in package.json.
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           pnpm exec electron-builder --mac \
             --config.publish.owner="$OWNER" \
-            --config.publish.repo="$REPO"
+            --config.publish.repo="$REPO" \
+            --config.extraMetadata.version="$VERSION"
         env:
-          # No signing — unsigned builds only.
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload macOS artifacts
@@ -61,11 +149,15 @@ jobs:
             artifacts/desktop/dist/*.dmg
             artifacts/desktop/dist/latest-mac.yml
 
+  # ── Windows ────────────────────────────────────────────────────────────────
   build-windows:
     name: Windows (.exe)
+    needs: [prepare]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -82,12 +174,13 @@ jobs:
         working-directory: artifacts/desktop
         shell: bash
         run: |
-          # Derive owner and repo from the Actions context (same as macOS job).
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           pnpm exec electron-builder --win \
             --config.publish.owner="$OWNER" \
-            --config.publish.repo="$REPO"
+            --config.publish.repo="$REPO" \
+            --config.extraMetadata.version="$VERSION"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -97,11 +190,15 @@ jobs:
             artifacts/desktop/dist/*.exe
             artifacts/desktop/dist/latest.yml
 
+  # ── Linux ──────────────────────────────────────────────────────────────────
   build-linux:
     name: Linux (.AppImage)
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -117,12 +214,13 @@ jobs:
       - name: Build Linux AppImage
         working-directory: artifacts/desktop
         run: |
-          # Derive owner and repo from the Actions context (same as macOS job).
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           pnpm exec electron-builder --linux \
             --config.publish.owner="$OWNER" \
-            --config.publish.repo="$REPO"
+            --config.publish.repo="$REPO" \
+            --config.extraMetadata.version="$VERSION"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -132,9 +230,10 @@ jobs:
             artifacts/desktop/dist/*.AppImage
             artifacts/desktop/dist/latest-linux.yml
 
+  # ── Release ────────────────────────────────────────────────────────────────
   release:
     name: Publish GitHub Release
-    needs: [build-mac, build-windows, build-linux]
+    needs: [prepare, build-mac, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,9 +247,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-latest
-          name: EE Software Screener — Desktop App
+          name: EE Software Screener — Desktop App (v${{ needs.prepare.outputs.version }})
           body: |
             ## Download the EE Software Screener
+
+            **Version ${{ needs.prepare.outputs.version }}**
 
             | Platform | File |
             |----------|------|
