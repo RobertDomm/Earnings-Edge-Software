@@ -1,7 +1,7 @@
 import { useAuth, useUser } from "@clerk/react";
 import { useLocation } from "wouter";
 import { useEffect } from "react";
-import { useGetAuthStatus } from "@workspace/api-client-react";
+import { useGetAuthStatus, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 
 /**
  * Redirects unauthenticated users to /sign-in.
@@ -17,6 +17,7 @@ export function useRequireAuth() {
   // Only runs when Clerk reports the user is signed in.
   const { data: authStatus } = useGetAuthStatus({
     query: {
+      queryKey: getGetAuthStatusQueryKey(),
       enabled: isLoaded && !!isSignedIn,
       refetchInterval: 5 * 60 * 1000, // re-check membership every 5 min
     },

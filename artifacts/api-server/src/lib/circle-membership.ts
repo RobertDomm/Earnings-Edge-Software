@@ -27,43 +27,10 @@ interface UserAuthCache {
   cachedAt: number;
 }
 
-const cache = new Map<string, UserAuthCache>();
-
-/**
- * Returns the email and Circle membership status for a Clerk userId.
- * Cached for CACHE_TTL_MS — shared between requireAuth middleware and
- * the /auth/status route so they agree without duplicate Clerk/Circle calls.
- */
-export async function getUserAuthInfo(
-  userId: string
-): Promise<{ email: string; authorized: boolean }> {
-  const now = Date.now();
-  const cached = cache.get(userId);
-  if (cached && now - cached.cachedAt < CACHE_TTL_MS) {
-    return { email: cached.email, authorized: cached.authorized };
-  }
-
-  // Fetch primary email from Clerk
-  let email = "";
-  try {
-    const user = await clerkClient.users.getUser(userId);
-    email =
-      user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId)
-        ?.emailAddress ?? user.emailAddresses[0]?.emailAddress ?? "";
-  } catch (err) {
-    logger.error({ err, userId }, "Failed to fetch Clerk user");
-    return { email: "", authorized: false };
-  }
-
-  if (!email) {
-    cache.set(userId, { email: "", authorized: false, cachedAt: now });
-    return { email: "", authorized: false };
-  }
-
-  // Check Circle Space Group membership
-  const authorized = await checkCircleMembership(email);
-  cache.set(userId, { email, authorized, cachedAt: now });
-  return { email, authorized };
+/** Minimal shape of a Clerk user record used for email resolution. */
+export interface ClerkUserRecord {
+  primaryEmailAddressId?: string | null;
+  emailAddresses: Array<{ id: string; emailAddress: string }>;
 }
 
 async function checkCircleMembership(email: string): Promise<boolean> {
@@ -108,3 +75,62 @@ async function checkCircleMembership(email: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Factory that builds a getUserAuthInfo function with an injectable Clerk
+ * user-fetcher.  Use this in tests to avoid real Clerk API calls.
+ *
+ * Production code calls the pre-built `getUserAuthInfo` export below, which
+ * uses the real `clerkClient.users.getUser`.
+ */
+export function createGetUserAuthInfo(
+  getClerkUser: GetClerkUser,
+): (userId: string) => Promise<{ email: string; authorized: boolean }> {
+  const localCache = new Map<string, UserAuthCache>();
+
+  return async function _getUserAuthInfo(
+    userId: string,
+  ): Promise<{ email: string; authorized: boolean }> {
+    const now = Date.now();
+    const cached = localCache.get(userId);
+    if (cached && now - cached.cachedAt < CACHE_TTL_MS) {
+      return { email: cached.email, authorized: cached.authorized };
+    }
+
+    // Fetch email from Clerk
+    let email = "";
+    try {
+      const user = await getClerkUser(userId);
+      email =
+        user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId)
+          ?.emailAddress ?? user.emailAddresses[0]?.emailAddress ?? "";
+    } catch (err) {
+      logger.error({ err, userId }, "Failed to fetch Clerk user");
+      return { email: "", authorized: false };
+    }
+
+    if (!email) {
+      localCache.set(userId, { email: "", authorized: false, cachedAt: now });
+      return { email: "", authorized: false };
+    }
+
+    // Check Circle Space Group membership
+    const authorized = await checkCircleMembership(email);
+    localCache.set(userId, { email, authorized, cachedAt: now });
+    return { email, authorized };
+  };
+}
+
+/** Fetches a Clerk user by ID.  Injectable for tests. */
+export type GetClerkUser = (userId: string) => Promise<ClerkUserRecord>;
+
+/**
+ * Returns the email and Circle membership status for a Clerk userId.
+ * Cached for CACHE_TTL_MS — call this from both requireAuth and the
+ * status endpoint so they agree without duplicate Clerk API calls.
+ *
+ * Uses the real Clerk client.  For tests, use `createGetUserAuthInfo`.
+ */
+export const getUserAuthInfo = createGetUserAuthInfo(
+  (userId) => clerkClient.users.getUser(userId) as Promise<ClerkUserRecord>,
+);
