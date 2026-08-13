@@ -39,8 +39,9 @@ export interface ICircleAuthService {
   /**
    * Validates an OAuth authorization code, verifies Space Group membership,
    * and returns the auth result. In mock mode the "code" is the scenario name.
+   * redirectUri must match the one used in the initial authorize request.
    */
-  validateAuthCode(code: string): Promise<AuthCheckResult>;
+  validateAuthCode(code: string, redirectUri?: string): Promise<AuthCheckResult>;
 
   /**
    * Revalidates an existing session — checks that the Circle user still has

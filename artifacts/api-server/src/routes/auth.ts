@@ -103,9 +103,13 @@ router.get("/auth/callback", async (req, res): Promise<void> => {
   const session = req.session as any;
   const code = typeof req.query.code === "string" ? req.query.code : "";
 
+  // Reconstruct the exact redirect_uri used during the authorize step —
+  // Circle requires it to match in the token exchange.
+  const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/callback`;
+
   let result;
   try {
-    result = await circleAuthService.validateAuthCode(code);
+    result = await circleAuthService.validateAuthCode(code, redirectUri);
   } catch (err) {
     // Log full error server-side; never expose it to the client
     logger.error({ err }, "Auth callback validation failed");

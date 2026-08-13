@@ -55,7 +55,7 @@ export class MockCircleAuthService implements ICircleAuthService {
     return "/api/auth/login?scenario=authorized";
   }
 
-  async validateAuthCode(code: string): Promise<AuthCheckResult> {
+  async validateAuthCode(code: string, _redirectUri?: string): Promise<AuthCheckResult> {
     // In mock mode, the "code" is the scenario name
     const scenario = code || "anonymous";
 

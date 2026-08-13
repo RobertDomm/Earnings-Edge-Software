@@ -83,7 +83,7 @@ export class LiveCircleAuthService implements ICircleAuthService {
     return `https://app.circle.so/oauth/authorize?${params}`;
   }
 
-  async validateAuthCode(code: string): Promise<AuthCheckResult> {
+  async validateAuthCode(code: string, redirectUri?: string): Promise<AuthCheckResult> {
     // 1. Exchange authorization code for access token
     let tokenData: CircleTokenResponse;
     try {
@@ -95,6 +95,8 @@ export class LiveCircleAuthService implements ICircleAuthService {
           client_secret: this.clientSecret,
           code,
           grant_type:    "authorization_code",
+          // redirect_uri must match the one used in the initial authorize request
+          ...(redirectUri ? { redirect_uri: redirectUri } : {}),
         }),
         signal: AbortSignal.timeout(15_000),
       });

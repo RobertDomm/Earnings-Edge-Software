@@ -23,4 +23,4 @@ timeoutMs = 20000
 
 [userenv.shared]
 MARKET_DATA_PROVIDER = "thetadata"
-CIRCLE_AUTH_MODE = "mock"
+CIRCLE_AUTH_MODE = "live"
