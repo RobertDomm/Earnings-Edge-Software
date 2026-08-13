@@ -27,6 +27,9 @@ node_modules
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# Screenshot assets (may contain PII)
+attached_assets/image_178660*.png
+
 # misc
 /.sass-cache
 /connect.lock
