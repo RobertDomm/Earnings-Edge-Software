@@ -439,15 +439,16 @@ describe("POST /auth/preflight — checkMembership throws returns 503 (Circle un
 // describe blocks concurrently.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe("getUserAuthInfo — Circle returns empty array (non-member)", () => {
+describe("getUserAuthInfo — Circle returns 200 with no valid member record (non-member)", () => {
   let restore: () => void;
   before(() => { restore = withCircleEnv(); });
   after(() => { restore(); });
 
-  it("returns authorized: false", async () => {
+  it("returns authorized: false when body has no numeric id", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => NON_MEMBER_CLERK_USER,
-      makeFetchMock(200, []),  // empty array → not a member
+      // Singular endpoint returns 200 + object; a missing/non-numeric id = not a member
+      makeFetchMock(200, {}),
     );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.authorized, false, "Non-member must not be authorized");
@@ -456,7 +457,7 @@ describe("getUserAuthInfo — Circle returns empty array (non-member)", () => {
   it("returns the correct email", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => NON_MEMBER_CLERK_USER,
-      makeFetchMock(200, []),
+      makeFetchMock(200, {}),
     );
     const result = await getUserAuthInfo(NON_MEMBER_USER_ID);
     assert.equal(result.email, NON_MEMBER_EMAIL);
@@ -486,7 +487,8 @@ describe("getUserAuthInfo — Circle returns member record (member)", () => {
   it("returns authorized: true", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => MEMBER_CLERK_USER,
-      makeFetchMock(200, [{ email: MEMBER_EMAIL, community_member_id: 42 }]),
+      // Singular endpoint returns a single object with a numeric id on success
+      makeFetchMock(200, { id: 42, community_member_id: 1234 }),
     );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
     assert.equal(result.authorized, true, "Confirmed member must be authorized");
@@ -495,7 +497,7 @@ describe("getUserAuthInfo — Circle returns member record (member)", () => {
   it("returns the correct email", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => MEMBER_CLERK_USER,
-      makeFetchMock(200, [{ email: MEMBER_EMAIL, community_member_id: 42 }]),
+      makeFetchMock(200, { id: 42, community_member_id: 1234 }),
     );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
     assert.equal(result.email, MEMBER_EMAIL);

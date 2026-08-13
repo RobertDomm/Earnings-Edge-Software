@@ -76,16 +76,16 @@ async function checkCircleMembership(
     });
 
     if (res.status === 200) {
-      // The Circle Admin v2 API returns an array of member records on 200.
-      // A non-empty array = member found; an empty array = not a member.
-      // We parse the body and only authorize when we see at least one record,
-      // so a 200 with [] is treated as non-member (fail-closed).
+      // The Circle Admin v2 singular endpoint (/space_group_member) returns a
+      // single JSON object on 200 when the member exists, e.g. { id: 123, ... }.
+      // A 404 means not a member.  We treat any 200 with a parseable object
+      // that has a numeric `id` as confirmed membership (fail-closed otherwise).
       const body = await res.json().catch(() => null);
-      if (Array.isArray(body) && body.length > 0) {
+      if (body && typeof body === "object" && !Array.isArray(body) && typeof (body as Record<string, unknown>).id === "number") {
         logger.debug({ email, spaceGroupId }, "Circle membership confirmed");
         return true;
       }
-      logger.debug({ email, spaceGroupId }, "Circle membership denied — 200 but no member records returned");
+      logger.debug({ email, spaceGroupId }, "Circle membership denied — 200 but response was not a valid member record");
       return false;
     }
 
