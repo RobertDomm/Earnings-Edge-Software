@@ -2,4 +2,5 @@
 - [Filter bypass for null data](filter-null-bypass.md) — Filters 2, 4, 5 pass (not fail) when earnings/IV data is null; needed for ThetaData mode which never supplies earnings dates or IV history.
 - [Clerk v6 Future API errors](clerk-future-api-errors.md) — methods resolve to { error }, never throw; API errors carry generic top-level code "api_response_error" — real code is nested in error.errors[].code.
 - [External Clerk on Replit](clerk-external-replit.md) — use clerkMiddleware() with no args; do NOT pass getClerkProxyHost() to it or Clerk loads from clerk.{dev-domain} and crashes.
+- [Clerk prod instance settings](clerk-prod-instance-settings.md) — Clerk dev/prod configs are separate; prod 422 "email_address not valid parameter" means email identifier + email-code strategy not enabled in the Production instance.
 - [Circle Admin v2 API](circle-api-admin-v2.md) — correct endpoint for space group membership is /api/admin/v2/space_group_member?email=X&space_group_id=Y; token type must be "Admin v2"; NOT /api/v1/.
