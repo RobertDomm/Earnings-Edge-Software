@@ -8,12 +8,16 @@ export default function Root() {
   const [_, setLocation] = useLocation();
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (isSignedIn) {
-      setLocation("/dashboard");
-    } else {
-      setLocation("/sign-in");
+    if (isLoaded) {
+      setLocation(isSignedIn ? "/dashboard" : "/sign-in");
+      return;
     }
+    // Clerk hasn't initialised yet. On the production domain this resolves in
+    // under a second. On the Replit dev domain the live keys are rejected and
+    // isLoaded stays false forever — bail out after 5 s so the sign-in page
+    // is shown instead of an infinite spinner.
+    const timeout = setTimeout(() => setLocation("/sign-in"), 5000);
+    return () => clearTimeout(timeout);
   }, [isLoaded, isSignedIn, setLocation]);
 
   return (
