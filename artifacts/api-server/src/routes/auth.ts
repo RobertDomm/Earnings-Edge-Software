@@ -7,9 +7,10 @@
  * Authorization is Circle Space Group membership, checked via CIRCLE_API_TOKEN.
  */
 
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type RequestHandler } from "express";
 import { getAuth as clerkGetAuth } from "@clerk/express";
 import { getUserAuthInfo, checkEmailMembership } from "../lib/circle-membership.js";
+import { createRateLimiter } from "../lib/rate-limiter.js";
 import { logger } from "../lib/logger.js";
 
 /** Shape expected of any getUserAuthInfo-compatible function. */
@@ -24,9 +25,21 @@ type GetAuth = (req: Request) => { userId: string | null | undefined };
 type CheckEmailMembership = (email: string) => Promise<boolean>;
 
 /**
+ * Production rate limiter for POST /auth/preflight.
+ * 10 requests per minute per IP — generous enough that a legitimate user
+ * (one submission + a few retries) is never affected, but tight enough
+ * to block bulk email-enumeration scripts.
+ */
+const defaultPreflightLimiter = createRateLimiter({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+});
+
+/**
  * Factory that builds the auth status router with injectable `getUserAuthInfo`,
- * `getAuth`, and `checkMembership` implementations.  Use this in tests to avoid
- * real Clerk / Circle API calls.
+ * `getAuth`, `checkMembership`, and `preflightLimiter` implementations.
+ * Use this in tests to avoid real Clerk / Circle API calls and to control
+ * rate-limit behaviour without waiting for real windows to expire.
  *
  * Production code uses the default export below (real Clerk + Circle).
  */
@@ -34,13 +47,15 @@ export function createAuthStatusRouter(
   getUserInfo: GetUserAuthInfo = getUserAuthInfo,
   getAuth: GetAuth = clerkGetAuth,
   checkMembership: CheckEmailMembership = checkEmailMembership,
+  preflightLimiter: RequestHandler = defaultPreflightLimiter,
 ): IRouter {
   const router: IRouter = Router();
 
   // POST /auth/preflight — public; checks Circle membership BEFORE Clerk sends
   // a verification code. Allows the frontend to gate sign-in on Circle access
   // without ever creating a Clerk account for non-members.
-  router.post("/auth/preflight", async (req, res): Promise<void> => {
+  // Rate-limited per IP (default: 10 req/min) to prevent email enumeration.
+  router.post("/auth/preflight", preflightLimiter, async (req, res): Promise<void> => {
     const { email } = req.body ?? {};
     if (!email || typeof email !== "string") {
       res.status(400).json({ error: "email required" });

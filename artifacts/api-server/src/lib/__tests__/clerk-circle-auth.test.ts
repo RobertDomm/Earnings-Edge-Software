@@ -55,6 +55,7 @@ import express from "express";
 import { createGetUserAuthInfo } from "../circle-membership.js";
 import { createRequireAuth } from "../../middlewares/require-auth.js";
 import { createAuthStatusRouter } from "../../routes/auth.js";
+import { createRateLimiter } from "../rate-limiter.js";
 
 // ─── Shared test fixtures ─────────────────────────────────────────────────────
 
@@ -950,6 +951,186 @@ describe("requireAuth middleware — expired/invalid Clerk JWT (userId is null)"
     assert.ok(
       !text.includes("userId") && !text.includes("stack"),
       `401 body must not expose internal session detail (got: ${text.slice(0, 200)})`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Layer 0 — POST /auth/preflight rate limiting
+//
+// The preflight endpoint is fully public, so without a rate limit a script
+// could enumerate Circle membership for arbitrary emails.  These tests confirm
+// that the injected rate limiter fires correctly.
+//
+// Each describe block gets its own Express app + rate-limiter instance so
+// the counters are isolated and tests don't interfere with each other.
+// The limiter is created with max=3 so tests run without waiting for long
+// real-time windows.  `getIp` is stubbed to a fixed string so every request
+// in the same suite counts toward the same bucket.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("POST /auth/preflight — rate limiter: first N requests are allowed", () => {
+  const MAX = 3;
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    const limiter = createRateLimiter({
+      windowMs: 60_000,
+      max: MAX,
+      getIp: () => "test-ip-allow",
+    });
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async () => false,
+      limiter,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it(`none of the first ${MAX} requests return 429`, async () => {
+    for (let i = 1; i <= MAX; i++) {
+      const res = await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+      });
+      assert.notEqual(
+        res.status,
+        429,
+        `Request ${i}/${MAX} must not be rate-limited`,
+      );
+    }
+  });
+});
+
+describe("POST /auth/preflight — rate limiter: (N+1)th request returns 429", () => {
+  const MAX = 3;
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    const limiter = createRateLimiter({
+      windowMs: 60_000,
+      max: MAX,
+      getIp: () => "test-ip-block",
+    });
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async () => false,
+      limiter,
+    ));
+    ts = await startServer(app);
+
+    // Exhaust the quota so subsequent requests in the tests are over-limit
+    for (let i = 0; i < MAX; i++) {
+      await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+      });
+    }
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 429 on the over-limit request", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    assert.equal(
+      res.status,
+      429,
+      `Expected 429 on request ${MAX + 1}, got ${res.status}`,
+    );
+  });
+
+  it("429 response includes a Retry-After header with a positive integer value", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    const retryAfter = res.headers.get("Retry-After");
+    assert.ok(
+      retryAfter !== null && Number.isInteger(Number(retryAfter)) && Number(retryAfter) > 0,
+      `Retry-After header must be a positive integer (got: ${retryAfter})`,
+    );
+  });
+
+  it("429 response body contains an error field", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    const body = (await res.json()) as { error: string };
+    assert.ok(
+      typeof body.error === "string" && body.error.length > 0,
+      "429 body must include a non-empty error field",
+    );
+  });
+});
+
+describe("POST /auth/preflight — rate limiter: different IPs have independent quotas", () => {
+  const MAX = 2;
+  let ts: TestServer;
+  let currentIp: string;
+
+  before(async () => {
+    currentIp = "ip-a";
+    const app = express();
+    app.use(express.json());
+    const limiter = createRateLimiter({
+      windowMs: 60_000,
+      max: MAX,
+      getIp: () => currentIp,
+    });
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async () => false,
+      limiter,
+    ));
+    ts = await startServer(app);
+
+    // Exhaust ip-a's quota
+    for (let i = 0; i < MAX; i++) {
+      await fetch(`${ts.url}/api/auth/preflight`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+      });
+    }
+  });
+  after(() => stopServer(ts.server));
+
+  it("ip-a is rate-limited after exhausting its quota", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    assert.equal(res.status, 429, `ip-a should be rate-limited, got ${res.status}`);
+  });
+
+  it("ip-b is NOT rate-limited (fresh quota)", async () => {
+    currentIp = "ip-b"; // switch to a different IP
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    assert.notEqual(
+      res.status,
+      429,
+      `ip-b must have its own fresh quota and must not be rate-limited (got ${res.status})`,
     );
   });
 });
