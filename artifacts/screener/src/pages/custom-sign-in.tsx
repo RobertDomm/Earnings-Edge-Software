@@ -9,13 +9,17 @@
  *  4. User enters the code → Clerk creates/resumes the session
  *  5. On subsequent visits, Clerk's session cookie keeps them signed in
  *     automatically (no code needed again until the session expires)
+ *
+ * Uses Clerk v6's "Future API":
+ *   useSignIn() → { signIn, fetchStatus }
+ *   signIn.emailCode.sendCode / verifyCode / finalize()
+ *   useSignUp() → { signUp, fetchStatus }
+ *   signUp.verifications.sendEmailCode / verifyEmailCode / finalize()
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSignIn, useSignUp } from '@clerk/react';
 import { useLocation } from 'wouter';
-
-const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 async function preflightCircleCheck(email: string): Promise<boolean> {
   try {
@@ -32,7 +36,10 @@ async function preflightCircleCheck(email: string): Promise<boolean> {
   }
 }
 
+const RESEND_COOLDOWN_S = 30;
+
 type Step = 'email' | 'code';
+type ResendStatus = 'idle' | 'sending' | 'sent';
 
 export default function CustomSignInPage() {
   const [step, setStep] = useState<Step>('email');
@@ -42,13 +49,51 @@ export default function CustomSignInPage() {
   const [loading, setLoading] = useState(false);
   const [isNewUser, setIsNewUser] = useState(false);
 
-  const { signIn, setActive: setSignInActive, isLoaded: signInLoaded } = useSignIn();
-  const { signUp, setActive: setSignUpActive, isLoaded: signUpLoaded } = useSignUp();
+  // Resend-code state
+  const [resendCooldown, setResendCooldown] = useState(0); // seconds remaining
+  const [resendStatus, setResendStatus] = useState<ResendStatus>('idle');
+  const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clerk v6 Future API — hooks return { signIn/signUp, errors, fetchStatus }
+  const { signIn, fetchStatus: signInFetchStatus } = useSignIn();
+  const { signUp, fetchStatus: signUpFetchStatus } = useSignUp();
   const [, navigate] = useLocation();
+
+  const clerkReady =
+    signInFetchStatus !== 'fetching' && signUpFetchStatus !== 'fetching';
+
+  /** Start the 30-second cooldown countdown. */
+  function startCooldown() {
+    setResendCooldown(RESEND_COOLDOWN_S);
+    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    cooldownTimer.current = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(cooldownTimer.current!);
+          cooldownTimer.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
+
+  // Clear the timer when the component unmounts.
+  useEffect(() => {
+    return () => {
+      if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    };
+  }, []);
+
+  // Start the cooldown as soon as the code step is first shown.
+  useEffect(() => {
+    if (step === 'code') startCooldown();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signInLoaded || !signUpLoaded) return;
+    if (!clerkReady || !signIn || !signUp) return;
 
     const trimmedEmail = email.trim().toLowerCase();
     if (!trimmedEmail) return;
@@ -67,25 +112,17 @@ export default function CustomSignInPage() {
         return;
       }
 
-      // Step 2a: Try signing in (existing Clerk user)
+      // Step 2a: Try sending a code for an existing Clerk user
       try {
-        const result = await signIn!.create({
-          strategy: 'email_code',
-          identifier: trimmedEmail,
-        });
-        if (result.status === 'needs_first_factor') {
-          setIsNewUser(false);
-          setStep('code');
-        }
+        await signIn.emailCode.sendCode({ emailAddress: trimmedEmail });
+        setIsNewUser(false);
+        setStep('code');
       } catch (signInErr: any) {
         const errCode = signInErr?.errors?.[0]?.code;
         // Step 2b: No Clerk account yet — create one and send verification code
-        if (
-          errCode === 'form_identifier_not_found' ||
-          errCode === 'form_password_incorrect'
-        ) {
-          await signUp!.create({ emailAddress: trimmedEmail });
-          await signUp!.prepareEmailAddressVerification({ strategy: 'email_code' });
+        if (errCode === 'form_identifier_not_found') {
+          await signUp.create({ emailAddress: trimmedEmail });
+          await signUp.verifications.sendEmailCode();
           setIsNewUser(true);
           setStep('code');
         } else {
@@ -105,27 +142,22 @@ export default function CustomSignInPage() {
 
   const handleCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signInLoaded || !signUpLoaded) return;
+    if (!clerkReady || !signIn || !signUp) return;
 
     setLoading(true);
     setError('');
 
     try {
       if (isNewUser) {
-        const result = await signUp!.attemptEmailAddressVerification({
-          code: code.trim(),
-        });
-        if (result.status === 'complete') {
-          await setSignUpActive!({ session: result.createdSessionId });
+        await signUp.verifications.verifyEmailCode({ code: code.trim() });
+        if (signUp.status === 'complete') {
+          await signUp.finalize();
           navigate('/');
         }
       } else {
-        const result = await signIn!.attemptFirstFactor({
-          strategy: 'email_code',
-          code: code.trim(),
-        });
-        if (result.status === 'complete') {
-          await setSignInActive!({ session: result.createdSessionId });
+        await signIn.emailCode.verifyCode({ code: code.trim() });
+        if (signIn.status === 'complete') {
+          await signIn.finalize();
           navigate('/');
         }
       }
@@ -139,6 +171,42 @@ export default function CustomSignInPage() {
       setLoading(false);
     }
   };
+
+  const handleResend = async () => {
+    if (!clerkReady || resendCooldown > 0 || !signIn || !signUp) return;
+
+    setResendStatus('sending');
+    setError('');
+
+    try {
+      if (isNewUser) {
+        await signUp.verifications.sendEmailCode();
+      } else {
+        // No params — resends to the identifier already set on the signIn
+        await signIn.emailCode.sendCode();
+      }
+      setResendStatus('sent');
+      startCooldown();
+      // Reset confirmation label after 2s
+      setTimeout(() => setResendStatus('idle'), 2000);
+    } catch (err: any) {
+      setResendStatus('idle');
+      const msg =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        'Could not resend the code. Please try again.';
+      setError(msg);
+    }
+  };
+
+  const resendLabel =
+    resendStatus === 'sending'
+      ? 'Sending…'
+      : resendStatus === 'sent'
+        ? 'Code resent ✓'
+        : resendCooldown > 0
+          ? `Resend code (${resendCooldown}s)`
+          : 'Resend code';
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
@@ -174,7 +242,7 @@ export default function CustomSignInPage() {
               {error && <p className="text-sm text-red-600">{error}</p>}
               <button
                 type="submit"
-                disabled={loading || !email.trim()}
+                disabled={loading || !email.trim() || !clerkReady}
                 className="w-full bg-gray-900 text-white py-2 rounded-md font-medium text-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
               >
                 {loading ? 'Checking…' : <>Continue &rarr;</>}
@@ -209,23 +277,46 @@ export default function CustomSignInPage() {
               >
                 {loading ? 'Verifying…' : 'Verify →'}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('email');
-                  setCode('');
-                  setError('');
-                }}
-                className="text-xs text-gray-400 hover:text-gray-600 underline text-center"
-              >
-                Use a different email
-              </button>
+
+              {/* Resend + back row */}
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resendCooldown > 0 || resendStatus === 'sending'}
+                  className={
+                    resendStatus === 'sent'
+                      ? 'text-green-600 cursor-default'
+                      : resendCooldown > 0 || resendStatus === 'sending'
+                        ? 'text-gray-300 cursor-not-allowed'
+                        : 'text-gray-500 hover:text-gray-700 underline'
+                  }
+                >
+                  {resendLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('email');
+                    setCode('');
+                    setError('');
+                    setResendStatus('idle');
+                    if (cooldownTimer.current) {
+                      clearInterval(cooldownTimer.current);
+                      cooldownTimer.current = null;
+                    }
+                    setResendCooldown(0);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 underline"
+                >
+                  Use a different email
+                </button>
+              </div>
             </form>
           )}
 
           <p className="text-center text-xs text-gray-400 mt-6">
-            Secured by{' '}
-            <span className="font-medium">Clerk</span>
+            Secured by <span className="font-medium">Clerk</span>
           </p>
         </div>
       </div>
