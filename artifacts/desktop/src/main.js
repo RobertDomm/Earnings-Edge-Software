@@ -4,7 +4,7 @@ const { app, BrowserWindow, shell, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
-const APP_URL = 'https://eesoftware.app/screener';
+const APP_URL = 'https://eesoftware.app/screener/';
 
 // Keep a global reference so the window isn't garbage-collected.
 let mainWindow = null;
@@ -67,6 +67,11 @@ function createWindow() {
   });
 
   mainWindow.loadURL(APP_URL);
+
+  // Prevent the web page's <title> tag from overriding the window title.
+  mainWindow.on('page-title-updated', (event) => {
+    event.preventDefault();
+  });
 
   // Open external links in the system browser, not in the app window.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
