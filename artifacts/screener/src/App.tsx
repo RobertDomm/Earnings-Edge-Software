@@ -159,7 +159,7 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
-      localization={{ signIn: { start: { title: 'Welcome', subtitle: '' } } }}
+      localization={{ signIn: { start: { title: 'Welcome to the Earnings Edge Software', subtitle: '' } } }}
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
