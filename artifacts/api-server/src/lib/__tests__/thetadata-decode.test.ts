@@ -826,6 +826,53 @@ describe("fetchPolygonEarningsDataCached — per-ticker 24h cache", () => {
     }
   });
 
+  it("ThetaDataProvider bulk scan: event requests go through the provider's Polygon limiter", async () => {
+    clearPolygonEventsCache();
+    originalFetch = globalThis.fetch;
+    let slotAcquisitions = 0;
+    globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/v3/reference/dividends") || url.includes("/v3/reference/splits")) {
+        return makeJsonResponse({ results: [] });
+      }
+      // ThetaData nexus auth call fired by the constructor — reject silently.
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+    try {
+      // polygonRequestsPerMinute > 0 → provider constructs a real limiter…
+      const provider = new ThetaDataProvider("stub-theta-key", 300, "stub-polygon-key", 6000);
+      // …replace it with a counting stub to observe acquisitions.
+      (provider as unknown as { polygonLimiter: { acquire(): Promise<void> } }).polygonLimiter = {
+        acquire: async () => { slotAcquisitions++; },
+      };
+      // Reproduce exactly the enrichTicker events lookup (private method paths
+      // need gRPC; call the same cached helper with the provider's slot hook).
+      const p = provider as unknown as {
+        polygonApiKey: string;
+        polygonLimiter: { acquire(): Promise<void> } | null;
+      };
+      const fetchEventsLikeEnrichTicker = (symbol: string) =>
+        fetchPolygonUpcomingEventsCached(p.polygonApiKey, symbol, {
+          acquireSlot: p.polygonLimiter ? () => p.polygonLimiter!.acquire() : undefined,
+          retryBaseMs: 1,
+        });
+
+      const tickers = ["AAPL", "MSFT", "NVDA"];
+      await Promise.all(tickers.map(fetchEventsLikeEnrichTicker));
+      assert.equal(
+        slotAcquisitions,
+        tickers.length * 2,
+        "each uncached ticker must consume exactly two limiter slots (dividends + splits)"
+      );
+
+      await Promise.all(tickers.map(fetchEventsLikeEnrichTicker));
+      assert.equal(slotAcquisitions, tickers.length * 2, "cache hits must not consume limiter slots");
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearPolygonEventsCache();
+    }
+  });
+
   it("upcoming-events: second lookup for the same ticker is served from the 24h cache", async () => {
     clearPolygonEventsCache();
     originalFetch = globalThis.fetch;

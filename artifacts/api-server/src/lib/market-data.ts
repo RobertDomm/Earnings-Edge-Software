@@ -2429,13 +2429,23 @@ export class ThetaDataProvider implements IMarketDataProvider {
    */
   private readonly polygonApiKey: string | null;
 
+  /**
+   * Rate limiter shared by all Polygon HTTP requests this provider issues
+   * (upcoming-events lookups). Prevents a concurrent universe scan from
+   * bursting past the Polygon plan's request budget. Null = unlimited.
+   */
+  private polygonLimiter: PolygonRateLimiter | null;
+
   constructor(
     private readonly apiKey: string,
     cacheTtlSeconds = 300,
     polygonApiKey: string | null = null,
+    polygonRequestsPerMinute = 100,
   ) {
     this.cacheTtlMs   = cacheTtlSeconds * 1000;
     this.polygonApiKey = polygonApiKey;
+    this.polygonLimiter =
+      polygonRequestsPerMinute > 0 ? new PolygonRateLimiter(polygonRequestsPerMinute) : null;
     this.initPromise  = this.doInit();
     // Pre-warm universe in the background after auth succeeds.
     this.initPromise
@@ -2880,7 +2890,9 @@ export class ThetaDataProvider implements IMarketDataProvider {
         : { nextEarningsDate: null as string | null, earningsIvHistory: null as EarningsIvRecord[] | null };
 
       const upcomingEvents = this.polygonApiKey
-        ? await fetchPolygonUpcomingEventsCached(this.polygonApiKey, symbol).catch((err: unknown) => {
+        ? await fetchPolygonUpcomingEventsCached(this.polygonApiKey, symbol, {
+            acquireSlot: this.polygonLimiter ? () => this.polygonLimiter!.acquire() : undefined,
+          }).catch((err: unknown) => {
             console.warn(
               `[ThetaDataProvider] ${symbol}: unexpected upcoming-events failure — ` +
               `${err instanceof Error ? err.message : String(err)}`,
@@ -3095,10 +3107,14 @@ export function createMarketDataProvider(): IMarketDataProvider {
         "Filters 2, 4, and 5 will be bypassed. Set MARKET_DATA_API_KEY to a Polygon.io key to enable them."
       );
     }
+    // Same knob as live mode: POLYGON_REQUESTS_PER_MINUTE (default 100,
+    // appropriate for Polygon Starter; 0 = unlimited).
+    const thetaPolygonRpm = parseInt(process.env.POLYGON_REQUESTS_PER_MINUTE ?? "100", 10);
     return new ThetaDataProvider(
       apiKey,
       isFinite(cacheTtl) && cacheTtl > 0 ? cacheTtl : 300,
       polygonApiKey,
+      isFinite(thetaPolygonRpm) && thetaPolygonRpm >= 0 ? thetaPolygonRpm : 100,
     );
   }
 
