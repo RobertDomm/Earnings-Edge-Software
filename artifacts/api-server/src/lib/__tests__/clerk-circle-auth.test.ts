@@ -602,6 +602,53 @@ describe("getUserAuthInfo — Clerk user has no email (fail-closed)", () => {
   });
 });
 
+describe("getUserAuthInfo — every non-active Circle status is denied (fail-closed)", () => {
+  let restore: () => void;
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
+
+  const NON_ACTIVE_STATUSES: unknown[] = [
+    "banned",
+    "pending",
+    "expired",
+    "suspended",
+    "deleted",
+    "Active",              // wrong case must NOT be treated as active
+    "ACTIVE",
+    " active",             // whitespace variant must NOT pass
+    "active ",
+    "some_future_status",  // arbitrary unknown string Circle could add later
+    "",                    // empty string
+    null,
+    0,
+    true,
+  ];
+
+  for (const status of NON_ACTIVE_STATUSES) {
+    it(`returns authorized: false for status: ${JSON.stringify(status)}`, async () => {
+      const getUserAuthInfo = createGetUserAuthInfo(
+        async () => MEMBER_CLERK_USER,
+        makeFetchMock(200, { id: 42, community_member_id: 1234, status }),
+      );
+      const result = await getUserAuthInfo(MEMBER_USER_ID);
+      assert.equal(
+        result.authorized,
+        false,
+        `Member record with status ${JSON.stringify(status)} must be denied — only exactly "active" is authorized`,
+      );
+    });
+  }
+
+  it('returns authorized: true ONLY for the exact string "active" (control)', async () => {
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => MEMBER_CLERK_USER,
+      makeFetchMock(200, { id: 42, community_member_id: 1234, status: "active" }),
+    );
+    const result = await getUserAuthInfo(MEMBER_USER_ID);
+    assert.equal(result.authorized, true, 'Exact status "active" must remain authorized');
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Layer 2 — requireAuth middleware
 // ═══════════════════════════════════════════════════════════════════════════════
