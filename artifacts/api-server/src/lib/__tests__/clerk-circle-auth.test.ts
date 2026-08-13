@@ -504,28 +504,28 @@ describe("getUserAuthInfo — Circle returns active member record (member)", () 
   });
 });
 
-describe("getUserAuthInfo — Circle returns inactive member record (invited but not joined)", () => {
+describe("getUserAuthInfo — Circle returns inactive member record (added but not confirmed)", () => {
   let restore: () => void;
   before(() => { restore = withCircleEnv(); });
   after(() => { restore(); });
 
-  it("returns authorized: false for status: inactive", async () => {
+  it("returns authorized: true for status: inactive (legitimate member, deny-list rule)", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => MEMBER_CLERK_USER,
       makeFetchMock(200, { id: 42, community_member_id: 1234, status: "inactive" }),
     );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
-    assert.equal(result.authorized, false, "Inactive member must NOT be authorized — invited but not joined");
+    assert.equal(result.authorized, true, 'Inactive member must be authorized — Circle marks added-but-unconfirmed members "inactive"');
   });
 
-  it("returns authorized: false for a record with an id but no status field", async () => {
+  it("returns authorized: true for a record with an id but no status field", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => MEMBER_CLERK_USER,
-      // Missing status — treat as non-active (fail-closed)
+      // Missing status — member record exists and is not explicitly blocked
       makeFetchMock(200, { id: 42, community_member_id: 1234 }),
     );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
-    assert.equal(result.authorized, false, "Record without status must be denied (fail-closed)");
+    assert.equal(result.authorized, true, "Member record without a blocked status must be authorized");
   });
 });
 
@@ -602,30 +602,24 @@ describe("getUserAuthInfo — Clerk user has no email (fail-closed)", () => {
   });
 });
 
-describe("getUserAuthInfo — every non-active Circle status is denied (fail-closed)", () => {
+describe("getUserAuthInfo — blocked Circle statuses are denied (deny-list rule)", () => {
   let restore: () => void;
   before(() => { restore = withCircleEnv(); });
   after(() => { restore(); });
 
-  const NON_ACTIVE_STATUSES: unknown[] = [
+  const BLOCKED_STATUSES: string[] = [
     "banned",
-    "pending",
-    "expired",
     "suspended",
+    "removed",
+    "deactivated",
     "deleted",
-    "Active",              // wrong case must NOT be treated as active
-    "ACTIVE",
-    " active",             // whitespace variant must NOT pass
-    "active ",
-    "some_future_status",  // arbitrary unknown string Circle could add later
-    "",                    // empty string
-    null,
-    0,
-    true,
+    "blocked",
+    "Banned",     // case-insensitive matching of blocked statuses
+    "SUSPENDED",
   ];
 
-  for (const status of NON_ACTIVE_STATUSES) {
-    it(`returns authorized: false for status: ${JSON.stringify(status)}`, async () => {
+  for (const status of BLOCKED_STATUSES) {
+    it(`returns authorized: false for blocked status: ${JSON.stringify(status)}`, async () => {
       const getUserAuthInfo = createGetUserAuthInfo(
         async () => MEMBER_CLERK_USER,
         makeFetchMock(200, { id: 42, community_member_id: 1234, status }),
@@ -634,19 +628,36 @@ describe("getUserAuthInfo — every non-active Circle status is denied (fail-clo
       assert.equal(
         result.authorized,
         false,
-        `Member record with status ${JSON.stringify(status)} must be denied — only exactly "active" is authorized`,
+        `Member record with blocked status ${JSON.stringify(status)} must be denied`,
       );
     });
   }
 
-  it('returns authorized: true ONLY for the exact string "active" (control)', async () => {
-    const getUserAuthInfo = createGetUserAuthInfo(
-      async () => MEMBER_CLERK_USER,
-      makeFetchMock(200, { id: 42, community_member_id: 1234, status: "active" }),
-    );
-    const result = await getUserAuthInfo(MEMBER_USER_ID);
-    assert.equal(result.authorized, true, 'Exact status "active" must remain authorized');
-  });
+  const ALLOWED_STATUSES: unknown[] = [
+    "active",
+    "inactive",            // added-but-unconfirmed members are legitimate
+    "pending",
+    "some_future_status",  // unknown future statuses are not blocked
+    "",                    // empty string — not a blocked status
+    null,                  // non-string — treated as absent
+    0,
+    true,
+  ];
+
+  for (const status of ALLOWED_STATUSES) {
+    it(`returns authorized: true for non-blocked status: ${JSON.stringify(status)}`, async () => {
+      const getUserAuthInfo = createGetUserAuthInfo(
+        async () => MEMBER_CLERK_USER,
+        makeFetchMock(200, { id: 42, community_member_id: 1234, status }),
+      );
+      const result = await getUserAuthInfo(MEMBER_USER_ID);
+      assert.equal(
+        result.authorized,
+        true,
+        `Member record with non-blocked status ${JSON.stringify(status)} must be authorized`,
+      );
+    });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

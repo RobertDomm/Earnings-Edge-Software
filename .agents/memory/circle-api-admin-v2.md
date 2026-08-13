@@ -30,8 +30,8 @@ Authorization: Token <CIRCLE_API_TOKEN>
 
 **Why this matters:** The plural endpoint (`/space_group_members`) returns a paginated array and ignores the `email` filter — do NOT use it for membership checks. The singular endpoint returns one object; checking `Array.isArray(body)` always returns false and will deny every real member.
 
-## Product rule (owner-confirmed, Aug 2026)
-App access requires **active membership in the specific space group** configured in `CIRCLE_REQUIRED_SPACE_GROUP_ID` (the owner's required group is 226885). No space group access → no app access. `status: "inactive"` (invited but not joined) is denied; only `status === "active"` grants access. A record missing `status` is denied (fail-closed).
+## Product rule (revised Aug 2026 — deny-list, not allow-list)
+App access requires membership in the space group configured in `CIRCLE_REQUIRED_SPACE_GROUP_ID` (owner's group: 226885). Any member record (200 + numeric `id`) is authorized UNLESS its status (case-insensitive) is in the blocked set: banned, suspended, removed, deactivated, deleted, blocked. **`status: "inactive"` is ALLOWED** — Circle marks added-but-unconfirmed members "inactive", including the owner's own record; requiring `status === "active"` locked the owner out of production. Missing/unknown statuses are allowed; 404 stays denied; Circle outages throw → preflight 503.
 
 ## How to apply
 See `artifacts/api-server/src/lib/circle-membership.ts` — the `checkCircleMembership` function uses this exact pattern.

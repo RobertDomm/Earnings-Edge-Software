@@ -49,6 +49,32 @@ export async function checkEmailMembership(
  * Accepts an optional `fetchImpl` so tests can inject a mock without
  * mutating the global `fetch` (which would cause inter-suite races).
  */
+/**
+ * Circle member statuses that must NOT receive app access.
+ * Any other status (including "inactive" and unknown/future values) is allowed:
+ * Circle marks added-but-unconfirmed members "inactive", and those are
+ * legitimate space-group members.
+ */
+const BLOCKED_MEMBER_STATUSES = new Set([
+  "banned",
+  "suspended",
+  "removed",
+  "deactivated",
+  "deleted",
+  "blocked",
+]);
+
+/**
+ * Masks an email for logging so raw PII never reaches production logs,
+ * while keeping enough shape to correlate log lines during debugging.
+ * e.g. "robertdomm11@gmail.com" → "ro***@gmail.com"
+ */
+function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 0) return "***";
+  return `${email.slice(0, Math.min(2, at))}***@${email.slice(at + 1)}`;
+}
+
 async function checkCircleMembership(
   email: string,
   fetchImpl: typeof fetch = globalThis.fetch,
@@ -78,45 +104,51 @@ async function checkCircleMembership(
     if (res.status === 200) {
       // The Circle Admin v2 singular endpoint (/space_group_member) returns a
       // single JSON object on 200 when the member exists, e.g. { id: 123, status: "active", ... }.
-      // A 404 means not a member.  We require:
-      //   - a parseable object with a numeric `id` (confirms the record exists), AND
-      //   - `status === "active"` (invited-but-not-joined members have status "inactive"
-      //     and must NOT receive app access — only fully joined, active space group
-      //     members are authorized).
+      // A 404 means not a member.
+      //
+      // Status rule (deny-list): any member record found in the space group is
+      // authorized UNLESS its status is explicitly blocked. Circle marks
+      // added-but-unconfirmed members as "inactive" — these are legitimate
+      // members (including the community owner's own record) and must keep
+      // access. Only explicitly bad statuses (banned/suspended/removed/
+      // deactivated) are denied.
       const body = await res.json().catch(() => null);
       const record = body as Record<string, unknown> | null;
-      if (
-        record &&
+      const isMemberRecord =
+        record !== null &&
         typeof record === "object" &&
         !Array.isArray(record) &&
-        typeof record.id === "number" &&
-        record.status === "active"
-      ) {
-        logger.debug({ email, spaceGroupId }, "Circle membership confirmed (active member)");
-        return true;
+        typeof record.id === "number";
+
+      if (!isMemberRecord) {
+        logger.debug({ email: maskEmail(email), spaceGroupId }, "Circle membership denied — 200 but response was not a valid member record");
+        return false;
       }
-      if (record && typeof record.id === "number" && record.status !== "active") {
-        logger.debug({ email, spaceGroupId, status: record.status }, "Circle membership denied — member record found but status is not active");
-      } else {
-        logger.debug({ email, spaceGroupId }, "Circle membership denied — 200 but response was not a valid active member record");
+
+      const status = typeof record.status === "string" ? record.status.toLowerCase() : undefined;
+      if (status !== undefined && BLOCKED_MEMBER_STATUSES.has(status)) {
+        logger.info({ email: maskEmail(email), spaceGroupId, status }, "Circle membership denied — member status is blocked");
+        return false;
       }
-      return false;
+
+      logger.debug({ email: maskEmail(email), spaceGroupId, status }, "Circle membership confirmed (member record found, status not blocked)");
+      return true;
     }
 
     if (res.status === 404) {
-      logger.debug({ email, spaceGroupId }, "Circle membership denied — not a space group member");
+      logger.debug({ email: maskEmail(email), spaceGroupId }, "Circle membership denied — not a space group member");
       return false;
     }
 
     // Unexpected status — Circle API is misbehaving; surface this as an error
     // so the caller can distinguish from a genuine membership denial.
-    const body = await res.text().catch(() => "");
-    logger.warn({ status: res.status, email, body }, "Circle membership check returned unexpected status");
+    // Do not log the raw upstream body — it may contain member data.
+    logger.warn({ status: res.status, email: maskEmail(email) }, "Circle membership check returned unexpected status");
     throw new Error(`Circle API returned unexpected status ${res.status}`);
   } catch (err) {
     // Re-throw so the preflight handler can return 503 instead of treating
     // a Circle outage as a membership denial.
-    logger.error({ err, email }, "Circle membership check failed");
+    logger.error({ err, email: maskEmail(email) }, "Circle membership check failed");
     throw err;
   }
 }
@@ -171,7 +203,7 @@ export function createGetUserAuthInfo(
     try {
       authorized = await checkCircleMembership(email, fetchImpl);
     } catch (err) {
-      logger.error({ err, email }, "Circle API unreachable during session auth check — denying access (fail-closed)");
+      logger.error({ err, email: maskEmail(email) }, "Circle API unreachable during session auth check — denying access (fail-closed)");
       localCache.set(userId, { email, authorized: false, cachedAt: now });
       return { email, authorized: false };
     }
