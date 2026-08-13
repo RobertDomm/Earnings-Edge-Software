@@ -115,7 +115,6 @@ jobs:
         run: npm install -g pnpm
 
       - name: Install dependencies
-        working-directory: artifacts/desktop
         run: pnpm install
 
       - name: Generate .icns icon from PNG
@@ -135,6 +134,7 @@ jobs:
           REPO="${GITHUB_REPOSITORY#*/}"
           VERSION="${{ needs.prepare.outputs.version }}"
           pnpm exec electron-builder --mac \
+            --publish never \
             --config.publish.owner="$OWNER" \
             --config.publish.repo="$REPO" \
             --config.extraMetadata.version="$VERSION"
@@ -167,7 +167,6 @@ jobs:
         run: npm install -g pnpm
 
       - name: Install dependencies
-        working-directory: artifacts/desktop
         run: pnpm install
 
       - name: Build Windows installer
@@ -178,6 +177,7 @@ jobs:
           REPO="${GITHUB_REPOSITORY#*/}"
           VERSION="${{ needs.prepare.outputs.version }}"
           pnpm exec electron-builder --win \
+            --publish never \
             --config.publish.owner="$OWNER" \
             --config.publish.repo="$REPO" \
             --config.extraMetadata.version="$VERSION"
@@ -208,7 +208,6 @@ jobs:
         run: npm install -g pnpm
 
       - name: Install dependencies
-        working-directory: artifacts/desktop
         run: pnpm install
 
       - name: Build Linux AppImage
@@ -218,6 +217,7 @@ jobs:
           REPO="${GITHUB_REPOSITORY#*/}"
           VERSION="${{ needs.prepare.outputs.version }}"
           pnpm exec electron-builder --linux \
+            --publish never \
             --config.publish.owner="$OWNER" \
             --config.publish.repo="$REPO" \
             --config.extraMetadata.version="$VERSION"
