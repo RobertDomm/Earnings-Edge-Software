@@ -53,9 +53,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'edgefinder-logo.png'],
       manifest: {
-        name: 'EE Software Screener',
-        short_name: 'EE Screener',
-        description: 'Stock & Options Screener for EE Software members',
+        name: 'Earnings Edge Software',
+        short_name: 'Earnings Edge',
+        description: 'Earnings Edge Software — Stock & Options Screener for earnings-driven trades.',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
