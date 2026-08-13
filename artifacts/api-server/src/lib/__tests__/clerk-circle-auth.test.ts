@@ -363,7 +363,7 @@ describe("POST /auth/preflight — email is normalised before the membership che
   });
 });
 
-describe("POST /auth/preflight — checkMembership throws returns 500 without crashing", () => {
+describe("POST /auth/preflight — checkMembership throws returns 503 (Circle unavailable, not a denial)", () => {
   let ts: TestServer;
 
   before(async () => {
@@ -378,13 +378,13 @@ describe("POST /auth/preflight — checkMembership throws returns 500 without cr
   });
   after(() => stopServer(ts.server));
 
-  it("returns HTTP 500", async () => {
+  it("returns HTTP 503 (not 200/403 — Circle outage is distinct from a membership denial)", async () => {
     const res = await fetch(`${ts.url}/api/auth/preflight`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
     });
-    assert.equal(res.status, 500, `Expected 500 when checkMembership throws, got ${res.status}`);
+    assert.equal(res.status, 503, `Expected 503 when checkMembership throws (Circle unavailable), got ${res.status}`);
   });
 
   it("does not expose the internal error message", async () => {
@@ -400,15 +400,18 @@ describe("POST /auth/preflight — checkMembership throws returns 500 without cr
     );
   });
 
-  it("response body contains an error field", async () => {
+  it("response body contains a circle_unavailable error code", async () => {
     const res = await fetch(`${ts.url}/api/auth/preflight`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
     });
     const body = (await res.json()) as { error: string };
-    assert.ok(typeof body.error === "string" && body.error.length > 0,
-      "500 body must include a non-empty error string");
+    assert.equal(
+      body.error,
+      "circle_unavailable",
+      `503 body must use error code 'circle_unavailable' (got: ${JSON.stringify(body.error)})`,
+    );
   });
 });
 

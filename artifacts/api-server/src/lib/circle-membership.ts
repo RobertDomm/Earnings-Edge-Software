@@ -94,13 +94,16 @@ async function checkCircleMembership(
       return false;
     }
 
-    // Unexpected status — fail closed
+    // Unexpected status — Circle API is misbehaving; surface this as an error
+    // so the caller can distinguish from a genuine membership denial.
     const body = await res.text().catch(() => "");
-    logger.warn({ status: res.status, email, body }, "Circle membership check returned unexpected status — denying");
-    return false;
+    logger.warn({ status: res.status, email, body }, "Circle membership check returned unexpected status");
+    throw new Error(`Circle API returned unexpected status ${res.status}`);
   } catch (err) {
-    logger.error({ err, email }, "Circle membership check threw — denying");
-    return false;
+    // Re-throw so the preflight handler can return 503 instead of treating
+    // a Circle outage as a membership denial.
+    logger.error({ err, email }, "Circle membership check failed");
+    throw err;
   }
 }
 
@@ -144,8 +147,20 @@ export function createGetUserAuthInfo(
       return { email: "", authorized: false };
     }
 
-    // Check Circle Space Group membership (uses the injected fetchImpl)
-    const authorized = await checkCircleMembership(email, fetchImpl);
+    // Check Circle Space Group membership (uses the injected fetchImpl).
+    // If the Circle API is temporarily unreachable, fail-closed (deny access)
+    // rather than propagating the throw — the session auth path must be
+    // stable even during a Circle outage.  Only the preflight path
+    // (checkEmailMembership → checkCircleMembership) surfaces the throw as
+    // a 503 so the UI can show "try again" instead of "not authorized".
+    let authorized: boolean;
+    try {
+      authorized = await checkCircleMembership(email, fetchImpl);
+    } catch (err) {
+      logger.error({ err, email }, "Circle API unreachable during session auth check — denying access (fail-closed)");
+      localCache.set(userId, { email, authorized: false, cachedAt: now });
+      return { email, authorized: false };
+    }
     localCache.set(userId, { email, authorized, cachedAt: now });
     return { email, authorized };
   };

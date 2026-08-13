@@ -21,18 +21,23 @@ import { useState, useEffect, useRef } from 'react';
 import { useSignIn, useSignUp } from '@clerk/react';
 import { useLocation } from 'wouter';
 
-async function preflightCircleCheck(email: string): Promise<boolean> {
+type PreflightResult = 'authorized' | 'unauthorized' | 'unavailable';
+
+async function preflightCircleCheck(email: string): Promise<PreflightResult> {
   try {
     const res = await fetch(`${window.location.origin}/api/auth/preflight`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    if (!res.ok) return false;
+    // 503 means the Circle API itself was unreachable — not a denial.
+    if (res.status === 503) return 'unavailable';
+    if (!res.ok) return 'unauthorized';
     const data = await res.json();
-    return data.authorized === true;
+    return data.authorized === true ? 'authorized' : 'unauthorized';
   } catch {
-    return false;
+    // Network failure reaching our own API — treat as unavailable.
+    return 'unavailable';
   }
 }
 
@@ -103,8 +108,15 @@ export default function CustomSignInPage() {
 
     try {
       // Step 1: Check Circle membership before touching Clerk
-      const authorized = await preflightCircleCheck(trimmedEmail);
-      if (!authorized) {
+      const preflight = await preflightCircleCheck(trimmedEmail);
+      if (preflight === 'unavailable') {
+        setError(
+          "Unable to verify your Circle membership right now — please try again in a moment.",
+        );
+        setLoading(false);
+        return;
+      }
+      if (preflight === 'unauthorized') {
         setError(
           "This email isn't authorized. Please use the email address registered in your Circle community.",
         );

@@ -65,8 +65,12 @@ export function createAuthStatusRouter(
       const authorized = await checkMembership(email.trim().toLowerCase());
       res.json({ authorized });
     } catch (err) {
-      logger.error({ err }, "Preflight Circle check failed");
-      res.status(500).json({ error: "preflight check failed" });
+      // Circle API was unreachable or returned an unexpected error — this is
+      // distinct from a genuine membership denial (authorized: false).
+      // Return 503 so the frontend can show a "try again" message instead of
+      // "email not authorized".
+      logger.error({ err }, "Preflight Circle check failed — returning 503");
+      res.status(503).json({ error: "circle_unavailable" });
     }
   });
 
