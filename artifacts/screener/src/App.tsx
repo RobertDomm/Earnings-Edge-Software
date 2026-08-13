@@ -102,7 +102,7 @@ function SignInPage() {
           path={`${basePath}/sign-in`}
           signUpUrl={`${basePath}/sign-up`}
           fallbackRedirectUrl={`${basePath}/`}
-          appearance={{ elements: { footerAction: { display: 'none' }, formFieldLabel: { display: 'none' }, headerTitle: { whiteSpace: 'pre-wrap' } } }}
+          appearance={{ elements: { footerAction: { display: 'none' }, formFieldLabel: { display: 'none' }, headerTitle: { whiteSpace: 'pre-wrap' }, socialButtonsBlockButton: { display: 'none' }, dividerRow: { display: 'none' } } }}
         />
       </div>
     </div>
