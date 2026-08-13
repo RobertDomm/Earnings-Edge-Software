@@ -33,6 +33,24 @@ export function createAuthStatusRouter(
 ): IRouter {
   const router: IRouter = Router();
 
+  // POST /auth/preflight — public; checks Circle membership BEFORE Clerk sends
+  // a verification code. Allows the frontend to gate sign-in on Circle access
+  // without ever creating a Clerk account for non-members.
+  router.post("/auth/preflight", async (req, res): Promise<void> => {
+    const { email } = req.body ?? {};
+    if (!email || typeof email !== "string") {
+      res.status(400).json({ error: "email required" });
+      return;
+    }
+    try {
+      const authorized = await checkEmailMembership(email.trim().toLowerCase());
+      res.json({ authorized });
+    } catch (err) {
+      logger.error({ err }, "Preflight Circle check failed");
+      res.status(500).json({ error: "preflight check failed" });
+    }
+  });
+
   // GET /auth/status — public, returns current Clerk auth + Circle membership state.
   // Polled by the frontend every few seconds; results are cached in circle-membership.ts.
   router.get("/auth/status", async (req, res): Promise<void> => {

@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, QueryCache } from '@tanstack/react-query';
-import { ClerkProvider, SignIn, SignUp } from '@clerk/react';
+import { ClerkProvider, SignUp } from '@clerk/react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -8,6 +8,7 @@ import NotFound from '@/pages/not-found';
 import Root from '@/pages/root';
 import Dashboard from '@/pages/dashboard';
 import AccessRestricted from '@/pages/access-restricted';
+import CustomSignInPage from '@/pages/custom-sign-in';
 import { useTheme } from '@/hooks/use-theme';
 
 import {
@@ -88,25 +89,7 @@ function stripBase(path: string): string {
 }
 
 function SignInPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
-      <div className="absolute inset-0 z-0">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
-      </div>
-      <div className="z-10 flex flex-col items-center gap-3">
-        <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest text-center max-w-xs">
-          Please use your Circle email to verify your authorization
-        </p>
-        <SignIn
-          routing="path"
-          path={`${basePath}/sign-in`}
-          signUpUrl={`${basePath}/sign-up`}
-          fallbackRedirectUrl={`${basePath}/`}
-          appearance={{ elements: { footerAction: { display: 'none' }, formFieldLabel: { display: 'none' }, headerTitle: { whiteSpace: 'pre-wrap' }, socialButtonsBlockButton: { display: 'none' }, dividerRow: { display: 'none' } } }}
-        />
-      </div>
-    </div>
-  );
+  return <CustomSignInPage />;
 }
 
 function SignUpPage() {
@@ -159,7 +142,6 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
-      localization={{ signIn: { start: { title: 'Welcome to\nThe Earnings Edge Software', subtitle: '' } } }}
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
