@@ -77,15 +77,29 @@ async function checkCircleMembership(
 
     if (res.status === 200) {
       // The Circle Admin v2 singular endpoint (/space_group_member) returns a
-      // single JSON object on 200 when the member exists, e.g. { id: 123, ... }.
-      // A 404 means not a member.  We treat any 200 with a parseable object
-      // that has a numeric `id` as confirmed membership (fail-closed otherwise).
+      // single JSON object on 200 when the member exists, e.g. { id: 123, status: "active", ... }.
+      // A 404 means not a member.  We require:
+      //   - a parseable object with a numeric `id` (confirms the record exists), AND
+      //   - `status === "active"` (invited-but-not-joined members have status "inactive"
+      //     and must NOT receive app access — only fully joined, active space group
+      //     members are authorized).
       const body = await res.json().catch(() => null);
-      if (body && typeof body === "object" && !Array.isArray(body) && typeof (body as Record<string, unknown>).id === "number") {
-        logger.debug({ email, spaceGroupId }, "Circle membership confirmed");
+      const record = body as Record<string, unknown> | null;
+      if (
+        record &&
+        typeof record === "object" &&
+        !Array.isArray(record) &&
+        typeof record.id === "number" &&
+        record.status === "active"
+      ) {
+        logger.debug({ email, spaceGroupId }, "Circle membership confirmed (active member)");
         return true;
       }
-      logger.debug({ email, spaceGroupId }, "Circle membership denied — 200 but response was not a valid member record");
+      if (record && typeof record.id === "number" && record.status !== "active") {
+        logger.debug({ email, spaceGroupId, status: record.status }, "Circle membership denied — member record found but status is not active");
+      } else {
+        logger.debug({ email, spaceGroupId }, "Circle membership denied — 200 but response was not a valid active member record");
+      }
       return false;
     }
 

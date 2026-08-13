@@ -479,7 +479,7 @@ describe("getUserAuthInfo — Circle returns 404 (non-member)", () => {
   });
 });
 
-describe("getUserAuthInfo — Circle returns member record (member)", () => {
+describe("getUserAuthInfo — Circle returns active member record (member)", () => {
   let restore: () => void;
   before(() => { restore = withCircleEnv(); });
   after(() => { restore(); });
@@ -487,20 +487,45 @@ describe("getUserAuthInfo — Circle returns member record (member)", () => {
   it("returns authorized: true", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => MEMBER_CLERK_USER,
-      // Singular endpoint returns a single object with a numeric id on success
-      makeFetchMock(200, { id: 42, community_member_id: 1234 }),
+      // Singular endpoint returns a single object with a numeric id and status: "active"
+      makeFetchMock(200, { id: 42, community_member_id: 1234, status: "active" }),
     );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
-    assert.equal(result.authorized, true, "Confirmed member must be authorized");
+    assert.equal(result.authorized, true, "Active member must be authorized");
   });
 
   it("returns the correct email", async () => {
     const getUserAuthInfo = createGetUserAuthInfo(
       async () => MEMBER_CLERK_USER,
-      makeFetchMock(200, { id: 42, community_member_id: 1234 }),
+      makeFetchMock(200, { id: 42, community_member_id: 1234, status: "active" }),
     );
     const result = await getUserAuthInfo(MEMBER_USER_ID);
     assert.equal(result.email, MEMBER_EMAIL);
+  });
+});
+
+describe("getUserAuthInfo — Circle returns inactive member record (invited but not joined)", () => {
+  let restore: () => void;
+  before(() => { restore = withCircleEnv(); });
+  after(() => { restore(); });
+
+  it("returns authorized: false for status: inactive", async () => {
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => MEMBER_CLERK_USER,
+      makeFetchMock(200, { id: 42, community_member_id: 1234, status: "inactive" }),
+    );
+    const result = await getUserAuthInfo(MEMBER_USER_ID);
+    assert.equal(result.authorized, false, "Inactive member must NOT be authorized — invited but not joined");
+  });
+
+  it("returns authorized: false for a record with an id but no status field", async () => {
+    const getUserAuthInfo = createGetUserAuthInfo(
+      async () => MEMBER_CLERK_USER,
+      // Missing status — treat as non-active (fail-closed)
+      makeFetchMock(200, { id: 42, community_member_id: 1234 }),
+    );
+    const result = await getUserAuthInfo(MEMBER_USER_ID);
+    assert.equal(result.authorized, false, "Record without status must be denied (fail-closed)");
   });
 });
 
