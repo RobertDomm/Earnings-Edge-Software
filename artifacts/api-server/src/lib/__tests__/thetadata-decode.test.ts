@@ -229,7 +229,12 @@ describe("GreeksAll row: underlying_price extraction for stock-price fallback", 
 // ---------------------------------------------------------------------------
 
 import { ScreeningEngine } from "../screening-engine.js";
-import { fetchPolygonEarningsData, ThetaDataProvider } from "../market-data.js";
+import {
+  fetchPolygonEarningsData,
+  fetchPolygonEarningsDataCached,
+  clearPolygonEarningsCache,
+  ThetaDataProvider,
+} from "../market-data.js";
 import type { StockQuote } from "../market-data.js";
 
 function makeThetaDataStock(overrides: Partial<StockQuote> = {}): StockQuote {
@@ -551,6 +556,152 @@ describe("fetchPolygonEarningsData — stub Polygon HTTP (both API keys active)"
       assert.equal(result.earningsIvHistory, null, "earningsIvHistory must be null when financials call fails");
     } finally {
       restoreFetch();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchPolygonEarningsData — retry, error logging, and per-ticker caching
+// ---------------------------------------------------------------------------
+
+describe("fetchPolygonEarningsData — retry and error logging", () => {
+  let originalFetch: typeof globalThis.fetch;
+  let originalWarn: typeof console.warn;
+  let warnings: string[];
+
+  function setup(stub: typeof globalThis.fetch): void {
+    originalFetch = globalThis.fetch;
+    originalWarn = console.warn;
+    warnings = [];
+    globalThis.fetch = stub;
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+  }
+
+  function teardown(): void {
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
+  }
+
+  const FAST = { retryBaseMs: 1 }; // keep test backoff delays negligible
+
+  it("retries a 429 and succeeds on the second attempt", async () => {
+    let financialsCalls = 0;
+    setup(async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) {
+        financialsCalls++;
+        if (financialsCalls === 1) return makeJsonResponse({ error: "rate limit" }, 429);
+        return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      }
+      if (url.includes("/v2/aggs/ticker/")) return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    });
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META", FAST);
+      assert.equal(financialsCalls, 2, "must retry once after the 429");
+      assert.ok(result.nextEarningsDate !== null, "must succeed after retry");
+      assert.equal(warnings.length, 0, "no warning when retry succeeds");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("gives up after retries and logs a classified throttling warning", async () => {
+    let financialsCalls = 0;
+    setup(async () => { financialsCalls++; return makeJsonResponse({ error: "rate limit" }, 429); });
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "NVDA", { ...FAST, retries: 2 });
+      assert.equal(financialsCalls, 3, "1 initial + 2 retries");
+      assert.equal(result.nextEarningsDate, null);
+      assert.equal(warnings.length, 1, "exactly one warning after exhausting retries");
+      assert.match(warnings[0]!, /NVDA/, "warning must name the ticker");
+      assert.match(warnings[0]!, /throttled \(429\)/, "warning must classify the failure as throttling");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("does NOT retry auth errors and logs an auth-classified warning", async () => {
+    let financialsCalls = 0;
+    setup(async () => { financialsCalls++; return makeJsonResponse({ error: "unauthorized" }, 401); });
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "AMD", FAST);
+      assert.equal(financialsCalls, 1, "auth failures must not be retried");
+      assert.equal(result.nextEarningsDate, null);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0]!, /auth error \(401\)/, "warning must classify the failure as auth");
+    } finally {
+      teardown();
+    }
+  });
+
+  it("logs a warning when Polygon returns zero filings", async () => {
+    setup(async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) return makeJsonResponse({ results: [], status: "OK" });
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    });
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "TSLA", FAST);
+      assert.equal(result.nextEarningsDate, null);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0]!, /no quarterly filings/, "warning must state that no filings were returned");
+    } finally {
+      teardown();
+    }
+  });
+});
+
+describe("fetchPolygonEarningsDataCached — per-ticker 24h cache", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  function countingStub(counter: { calls: number }, ok = true): typeof globalThis.fetch {
+    return async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) {
+        counter.calls++;
+        return ok
+          ? makeJsonResponse({ results: STUB_FILINGS, status: "OK" })
+          : makeJsonResponse({ error: "boom" }, 500);
+      }
+      if (url.includes("/v2/aggs/ticker/")) return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+  }
+
+  it("serves the second lookup for the same ticker from cache (no second HTTP call)", async () => {
+    clearPolygonEarningsCache();
+    const counter = { calls: 0 };
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = countingStub(counter);
+    try {
+      const first  = await fetchPolygonEarningsDataCached("stub-key", "META", { retryBaseMs: 1 });
+      const second = await fetchPolygonEarningsDataCached("stub-key", "META", { retryBaseMs: 1 });
+      assert.equal(counter.calls, 1, "second call must be served from cache");
+      assert.deepEqual(second, first, "cached result must equal the original");
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearPolygonEarningsCache();
+    }
+  });
+
+  it("does NOT cache failures — next call retries the fetch", async () => {
+    clearPolygonEarningsCache();
+    const counter = { calls: 0 };
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = countingStub(counter, false);
+    try {
+      const first = await fetchPolygonEarningsDataCached("stub-key", "META", { retries: 0, retryBaseMs: 1 });
+      assert.equal(first.nextEarningsDate, null);
+      const callsAfterFirst = counter.calls;
+      await fetchPolygonEarningsDataCached("stub-key", "META", { retries: 0, retryBaseMs: 1 });
+      assert.ok(counter.calls > callsAfterFirst, "failed lookups must not be cached");
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.warn = originalWarn;
+      clearPolygonEarningsCache();
     }
   });
 });

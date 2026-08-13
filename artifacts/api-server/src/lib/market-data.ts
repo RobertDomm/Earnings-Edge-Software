@@ -930,29 +930,83 @@ interface UniverseCache {
 // Polygon earnings helper — shared by LiveMarketDataProvider and ThetaDataProvider
 // ---------------------------------------------------------------------------
 
+/** Error carrying the HTTP status of a failed Polygon request, so retry and
+ *  log-classification logic can distinguish throttling / auth / server faults. */
+class PolygonHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "PolygonHttpError";
+  }
+}
+
+/** Human-readable failure category for warn logs. */
+function classifyPolygonError(err: unknown): string {
+  if (err instanceof PolygonHttpError) {
+    if (err.status === 429) return "throttled (429)";
+    if (err.status === 401 || err.status === 403) return `auth error (${err.status}) — check MARKET_DATA_API_KEY`;
+    if (err.status >= 500) return `Polygon server error (${err.status})`;
+    return `HTTP ${err.status}`;
+  }
+  if (err instanceof SyntaxError) return "unexpected response shape (invalid JSON)";
+  return "network error";
+}
+
+/** True for transient failures worth retrying: throttling, 5xx, network errors. */
+function isRetryablePolygonError(err: unknown): boolean {
+  if (err instanceof PolygonHttpError) return err.status === 429 || err.status >= 500;
+  return !(err instanceof SyntaxError) && err instanceof Error && !(err instanceof PolygonHttpError);
+}
+
+export interface PolygonEarningsFetchOptions {
+  /** Retries after the initial attempt for transient (429/5xx/network) failures. Default 2. */
+  retries?: number;
+  /** Base backoff in ms; attempt n waits retryBaseMs × 2ⁿ. Default 250. Tests pass 1. */
+  retryBaseMs?: number;
+}
+
 /**
  * Fetches the last 4 quarterly earnings dates and realized-vol history from
  * Polygon.io for a single ticker.  Used by LiveMarketDataProvider directly and
- * by ThetaDataProvider as a supplement when MARKET_DATA_API_KEY is set.
+ * by ThetaDataProvider (via fetchPolygonEarningsDataCached) when
+ * MARKET_DATA_API_KEY is set.
+ *
+ * Failures never throw — they resolve with null fields — but every failure is
+ * logged with the ticker and a classified reason (throttling / auth / server /
+ * response shape), and transient failures are retried with backoff first.
  *
  * No rate limiter: callers are responsible for concurrency control.
  */
 export async function fetchPolygonEarningsData(
   apiKey: string,
   ticker: string,
+  opts: PolygonEarningsFetchOptions = {},
 ): Promise<{ nextEarningsDate: string | null; earningsIvHistory: EarningsIvRecord[] | null }> {
   const baseUrl = "https://api.polygon.io";
+  const maxRetries = opts.retries ?? 2;
+  const retryBaseMs = opts.retryBaseMs ?? 250;
 
-  async function polyFetch<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+  async function polyFetchOnce<T>(path: string, params: Record<string, string>): Promise<T> {
     const url = new URL(`${baseUrl}${path}`);
     url.searchParams.set("apiKey", apiKey);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     const res = await fetch(url.toString());
     if (!res.ok) {
       const body = await res.text().catch(() => "(no body)");
-      throw new Error(`Polygon ${res.status} for ${path}: ${res.statusText} — ${body}`);
+      throw new PolygonHttpError(`Polygon ${res.status} for ${path}: ${res.statusText} — ${body}`, res.status);
     }
     return res.json() as Promise<T>;
+  }
+
+  /** polyFetchOnce + retry with exponential backoff on transient failures. */
+  async function polyFetch<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await polyFetchOnce<T>(path, params);
+      } catch (err) {
+        if (attempt >= maxRetries || !isRetryablePolygonError(err)) throw err;
+        await new Promise((r) => setTimeout(r, retryBaseMs * 2 ** attempt));
+      }
+    }
   }
 
   // --- Step 1: financials (single call) ---
@@ -971,8 +1025,18 @@ export async function fetchPolygonEarningsData(
     filings = (financials.results ?? [])
       .map((r) => r.filing_date ?? r.period_of_report_date)
       .filter((d): d is string => !!d);
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[PolygonEarnings] ${ticker}: financials fetch failed after retries — ${classifyPolygonError(err)}. ` +
+      `Earnings date unavailable; Filters 2/5 will bypass this ticker.`,
+    );
     return { nextEarningsDate: null, earningsIvHistory: null };
+  }
+
+  if (filings.length === 0) {
+    console.warn(
+      `[PolygonEarnings] ${ticker}: Polygon returned no quarterly filings — earnings date unavailable.`,
+    );
   }
 
   let nextEarningsDate: string | null = null;
@@ -1030,9 +1094,52 @@ export async function fetchPolygonEarningsData(
       nextEarningsDate,
       earningsIvHistory: records.length >= 4 ? records : null,
     };
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[PolygonEarnings] ${ticker}: price-aggregates fetch failed after retries — ${classifyPolygonError(err)}. ` +
+      `IV history unavailable; earnings date (${nextEarningsDate ?? "null"}) kept.`,
+    );
     return { nextEarningsDate, earningsIvHistory: null };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-ticker earnings cache
+//
+// Earnings dates move on a quarterly cadence, so refetching the whole universe
+// every ~5-minute cache refresh is wasteful. Successful lookups (a non-null
+// earnings date) are cached for 24h; failures are NOT cached, so the next
+// refresh retries them.
+// ---------------------------------------------------------------------------
+
+type PolygonEarningsResult = { nextEarningsDate: string | null; earningsIvHistory: EarningsIvRecord[] | null };
+
+const POLYGON_EARNINGS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const polygonEarningsCache = new Map<string, { data: PolygonEarningsResult; fetchedAt: number }>();
+
+/** Test hook: empty the per-ticker earnings cache. */
+export function clearPolygonEarningsCache(): void {
+  polygonEarningsCache.clear();
+}
+
+/**
+ * Cached wrapper around fetchPolygonEarningsData. Returns the cached result
+ * for a ticker when it is younger than 24h; otherwise fetches and caches the
+ * result only when it actually contains an earnings date.
+ */
+export async function fetchPolygonEarningsDataCached(
+  apiKey: string,
+  ticker: string,
+  opts: PolygonEarningsFetchOptions = {},
+): Promise<PolygonEarningsResult> {
+  const hit = polygonEarningsCache.get(ticker);
+  if (hit && Date.now() - hit.fetchedAt < POLYGON_EARNINGS_CACHE_TTL_MS) return hit.data;
+
+  const data = await fetchPolygonEarningsData(apiKey, ticker, opts);
+  if (data.nextEarningsDate !== null) {
+    polygonEarningsCache.set(ticker, { data, fetchedAt: Date.now() });
+  }
+  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -2598,10 +2705,18 @@ export class ThetaDataProvider implements IMarketDataProvider {
       // Supplement ThetaData options data with Polygon earnings data when available.
       // This eliminates the bypass on Filters 2, 4, and 5.
       const earningsData = this.polygonApiKey
-        ? await fetchPolygonEarningsData(this.polygonApiKey, symbol).catch(() => ({
-            nextEarningsDate: null as string | null,
-            earningsIvHistory: null as EarningsIvRecord[] | null,
-          }))
+        ? await fetchPolygonEarningsDataCached(this.polygonApiKey, symbol).catch((err: unknown) => {
+            // fetchPolygonEarningsData never throws, so this only fires on
+            // unexpected faults (e.g. cache layer bugs). Log — never silent.
+            console.warn(
+              `[ThetaDataProvider] ${symbol}: unexpected earnings-data failure — ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+            );
+            return {
+              nextEarningsDate: null as string | null,
+              earningsIvHistory: null as EarningsIvRecord[] | null,
+            };
+          })
         : { nextEarningsDate: null as string | null, earningsIvHistory: null as EarningsIvRecord[] | null };
 
       return {
