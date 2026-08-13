@@ -23,13 +23,15 @@ GET https://app.circle.so/api/admin/v2/space_group_member
   &space_group_id=<CIRCLE_REQUIRED_SPACE_GROUP_ID>
 Authorization: Token <CIRCLE_API_TOKEN>
 ```
-- **200** → member is in the space group → authorized
+- **200** → returns a **single JSON object** (not an array) with numeric `id`, e.g. `{ id: 123, user_id: ..., space_group_id: ..., status: "inactive", ... }` → authorized if `typeof body.id === "number"`
 - **404** → not a member (or email not found in community) → denied
 - No `community_id` param needed on this endpoint.
 - `CIRCLE_COMMUNITY_ID` env var is NOT used by this endpoint (only needed for the list endpoints).
 
+**Why this matters:** The plural endpoint (`/space_group_members`) returns a paginated array and ignores the `email` filter — do NOT use it for membership checks. The singular endpoint returns one object; checking `Array.isArray(body)` always returns false and will deny every real member.
+
 ## Watch out
-The response includes `"status": "inactive"` for members who were invited but haven't confirmed. The current implementation treats any 200 as authorized regardless of status — this may let unconfirmed-invite members through. Consider filtering on `status === "active"` if that matters.
+The response includes `"status": "inactive"` for members who were invited but haven't confirmed. The current implementation treats any 200 with a numeric `id` as authorized regardless of status — this may let unconfirmed-invite members through. Consider filtering on `status === "active"` if that matters.
 
 ## How to apply
 See `artifacts/api-server/src/lib/circle-membership.ts` — the `checkCircleMembership` function uses this exact pattern.
