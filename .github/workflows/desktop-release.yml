@@ -40,7 +40,15 @@ jobs:
 
       - name: Build macOS DMG
         working-directory: artifacts/desktop
-        run: pnpm run build:mac
+        run: |
+          # Derive owner and repo from the Actions context so the auto-updater
+          # URL baked into the binary always matches the real GitHub release feed,
+          # regardless of what is hardcoded in package.json.
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          pnpm exec electron-builder --mac \
+            --config.publish.owner="$OWNER" \
+            --config.publish.repo="$REPO"
         env:
           # No signing — unsigned builds only.
           CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -72,7 +80,14 @@ jobs:
 
       - name: Build Windows installer
         working-directory: artifacts/desktop
-        run: pnpm run build:win
+        shell: bash
+        run: |
+          # Derive owner and repo from the Actions context (same as macOS job).
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          pnpm exec electron-builder --win \
+            --config.publish.owner="$OWNER" \
+            --config.publish.repo="$REPO"
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -101,7 +116,13 @@ jobs:
 
       - name: Build Linux AppImage
         working-directory: artifacts/desktop
-        run: pnpm run build:linux
+        run: |
+          # Derive owner and repo from the Actions context (same as macOS job).
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          pnpm exec electron-builder --linux \
+            --config.publish.owner="$OWNER" \
+            --config.publish.repo="$REPO"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
