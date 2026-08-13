@@ -124,7 +124,8 @@ router.get("/auth/login", async (req, res): Promise<void> => {
   const state = randomBytes(32).toString("hex");
   session.oauthState = state;
 
-  const callbackUrl = `${req.protocol}://${req.get("host")}/api/auth/callback`;
+  const proto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0].trim() ?? req.protocol;
+  const callbackUrl = `${proto}://${req.get("host")}/api/auth/callback`;
   const baseLoginUrl = circleAuthService.getLoginUrl(callbackUrl);
 
   // Append the state param to whatever URL getLoginUrl returned.
@@ -197,7 +198,8 @@ router.get("/auth/callback", async (req, res): Promise<void> => {
 
   // Reconstruct the exact redirect_uri used during the authorize step —
   // Circle requires it to match in the token exchange.
-  const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/callback`;
+  const proto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0].trim() ?? req.protocol;
+  const redirectUri = `${proto}://${req.get("host")}/api/auth/callback`;
 
   let result;
   try {
