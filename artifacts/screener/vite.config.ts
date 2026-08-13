@@ -47,6 +47,9 @@ export default defineConfig({
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'edgefinder-logo.png'],
       manifest: {
@@ -72,10 +75,9 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        // Don't cache API responses — auth always needs a live server check
-        navigateFallback: null,
-        runtimeCaching: [],
+      injectManifest: {
+        // offline.html is in public/ so it is automatically included in
+        // __WB_MANIFEST via the default **/*.html glob — no extra entry needed.
       },
     }),
     ...(process.env.NODE_ENV !== 'production' &&
