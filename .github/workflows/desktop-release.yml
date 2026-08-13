@@ -158,6 +158,8 @@ jobs:
           name: mac-dmg
           path: |
             artifacts/desktop/dist/*.dmg
+            artifacts/desktop/dist/mac/*.dmg
+            artifacts/desktop/dist/mac-arm64/*.dmg
             artifacts/desktop/dist/latest-mac.yml
 
   # ── Windows ────────────────────────────────────────────────────────────────
@@ -286,7 +288,7 @@ jobs:
           prerelease: false
           make_latest: true
           files: |
-            dist-all/mac-dmg/*.dmg
+            dist-all/mac-dmg/**/*.dmg
             dist-all/mac-dmg/latest-mac.yml
             dist-all/windows-exe/*.exe
             dist-all/windows-exe/latest.yml
