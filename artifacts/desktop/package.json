@@ -1,7 +1,7 @@
 {
   "name": "@workspace/desktop",
   "version": "1.0.0",
-  "description": "EE Software Screener — desktop wrapper",
+  "description": "Earnings Edge Software — desktop wrapper",
   "main": "src/main.js",
   "private": true,
   "scripts": {
@@ -20,8 +20,8 @@
   },
   "build": {
     "appId": "app.eesoftware.screener",
-    "productName": "EE Software Screener",
-    "copyright": "Copyright © 2026 EE Software",
+    "productName": "Earnings Edge Software",
+    "copyright": "Copyright © 2026 Earnings Edge Software",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -51,7 +51,7 @@
       "createStartMenuShortcut": true
     },
     "dmg": {
-      "title": "EESoftwareScreener",
+      "title": "EarningsEdgeSoftware",
       "contents": [
         { "x": 130, "y": 220 },
         { "x": 410, "y": 220, "type": "link", "path": "/Applications" }

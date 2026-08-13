@@ -54,7 +54,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'EE Software Screener',
+    title: 'Earnings Edge Software',
     icon: path.join(__dirname, '..', 'build', getIconFilename()),
     webPreferences: {
       nodeIntegration: false,
