@@ -26,12 +26,25 @@ export function useRequireAuth() {
   useEffect(() => {
     if (!isLoaded) return;
 
+    // Clerk reports session is gone — send to sign-in immediately.
     if (!isSignedIn) {
       setLocation("/sign-in");
       return;
     }
 
-    if (authStatus && !authStatus.authorized) {
+    if (!authStatus) return;
+
+    // Server says the session token is no longer valid (e.g. revoked from
+    // Clerk dashboard before the SDK's own refresh cycle catches it).
+    // Send to sign-in so the user gets a fresh Clerk prompt, not an opaque
+    // "access restricted" page.
+    if (!authStatus.authenticated) {
+      setLocation("/sign-in");
+      return;
+    }
+
+    // Session is valid but this email isn't a Circle Space Group member.
+    if (!authStatus.authorized) {
       setLocation("/access-restricted");
     }
   }, [isLoaded, isSignedIn, authStatus, setLocation]);

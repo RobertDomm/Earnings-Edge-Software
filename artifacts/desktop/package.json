@@ -41,7 +41,6 @@
       "icon": "build/icon.png",
       "category": "Finance"
     },
-    "extraResources": [],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

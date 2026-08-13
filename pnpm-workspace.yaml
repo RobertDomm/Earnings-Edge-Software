@@ -1,5 +1,6 @@
 packages:
   - artifacts/*
+  - '!artifacts/desktop'   # Electron app — installed only on GitHub Actions, not on Replit
   - lib/*
   - lib/integrations/*
   - scripts

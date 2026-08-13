@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryCache } from '@tanstack/react-query';
 import { ClerkProvider, SignIn, SignUp } from '@clerk/react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -16,8 +16,33 @@ import {
   useLocation,
   Router as WouterRouter,
 } from 'wouter';
+import { getGetAuthStatusQueryKey } from '@workspace/api-client-react';
 
-const queryClient = new QueryClient();
+/**
+ * Global React Query error handler.
+ * When any query or mutation returns a 401, the Clerk session is gone or
+ * the server has rejected it.  Force an immediate re-fetch of /auth/status
+ * so useRequireAuth can redirect to /sign-in within one polling cycle
+ * rather than waiting up to 5 minutes.
+ */
+function isApiError(err: unknown): err is { status: number } {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'status' in err &&
+    typeof (err as Record<string, unknown>).status === 'number'
+  );
+}
+
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => {
+      if (isApiError(error) && error.status === 401) {
+        queryClient.invalidateQueries({ queryKey: getGetAuthStatusQueryKey() });
+      }
+    },
+  }),
+});
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
 
