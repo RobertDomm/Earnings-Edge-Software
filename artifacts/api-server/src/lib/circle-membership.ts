@@ -1,16 +1,25 @@
 /**
  * Circle Space Group membership check with in-memory cache.
  *
- * Uses the CIRCLE_API_TOKEN to verify whether a given Clerk user
- * (looked up by userId) has access to the required Space Group.
- * Results are cached per userId for 15 minutes to avoid hammering
- * the Circle API on every request.
+ * Uses the Admin v2 Circle API token to verify whether a Clerk user's
+ * email belongs to the required Space Group.
+ *
+ * API:  GET /api/admin/v2/space_group_member?email=X&space_group_id=Y
+ *   200 → member found → authorized
+ *   404 → member not found → denied
+ *
+ * Results are cached per Clerk userId for 15 minutes to avoid repeated
+ * Circle API calls on every request.
+ *
+ * Token type required: "Admin v2" (from Circle Developers → Tokens)
  */
 
 import { clerkClient } from "@clerk/express";
 import { logger } from "./logger.js";
 
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+const CIRCLE_API_BASE = "https://app.circle.so/api/admin/v2";
 
 interface UserAuthCache {
   email: string;
@@ -22,8 +31,8 @@ const cache = new Map<string, UserAuthCache>();
 
 /**
  * Returns the email and Circle membership status for a Clerk userId.
- * Cached for CACHE_TTL_MS — call this from both requireAuth and the
- * status endpoint so they agree without duplicate Clerk API calls.
+ * Cached for CACHE_TTL_MS — shared between requireAuth middleware and
+ * the /auth/status route so they agree without duplicate Clerk/Circle calls.
  */
 export async function getUserAuthInfo(
   userId: string
@@ -34,7 +43,7 @@ export async function getUserAuthInfo(
     return { email: cached.email, authorized: cached.authorized };
   }
 
-  // Fetch email from Clerk
+  // Fetch primary email from Clerk
   let email = "";
   try {
     const user = await clerkClient.users.getUser(userId);
@@ -58,22 +67,20 @@ export async function getUserAuthInfo(
 }
 
 async function checkCircleMembership(email: string): Promise<boolean> {
-  const communityId = process.env.CIRCLE_COMMUNITY_ID;
   const spaceGroupId = process.env.CIRCLE_REQUIRED_SPACE_GROUP_ID;
   const apiToken = process.env.CIRCLE_API_TOKEN;
 
-  if (!communityId || !spaceGroupId || !apiToken) {
-    logger.warn("Circle membership env vars missing — denying access");
+  if (!spaceGroupId || !apiToken) {
+    logger.warn("CIRCLE_REQUIRED_SPACE_GROUP_ID or CIRCLE_API_TOKEN missing — denying access");
     return false;
   }
 
-  try {
-    const url =
-      `https://app.circle.so/api/v1/space_group_members` +
-      `?community_id=${encodeURIComponent(communityId)}` +
-      `&space_group_id=${encodeURIComponent(spaceGroupId)}` +
-      `&email=${encodeURIComponent(email)}`;
+  const url =
+    `${CIRCLE_API_BASE}/space_group_member` +
+    `?email=${encodeURIComponent(email)}` +
+    `&space_group_id=${encodeURIComponent(spaceGroupId)}`;
 
+  try {
     const res = await fetch(url, {
       headers: {
         Authorization: `Token ${apiToken}`,
@@ -82,19 +89,22 @@ async function checkCircleMembership(email: string): Promise<boolean> {
       signal: AbortSignal.timeout(10_000),
     });
 
-    if (res.status === 404) return false;
-    if (!res.ok) {
-      logger.warn({ status: res.status, email }, "Circle membership check failed — denying");
+    if (res.status === 200) {
+      logger.debug({ email, spaceGroupId }, "Circle membership confirmed");
+      return true;
+    }
+
+    if (res.status === 404) {
+      logger.debug({ email, spaceGroupId }, "Circle membership denied — not a space group member");
       return false;
     }
 
-    const data = (await res.json()) as any;
-    if (Array.isArray(data)) return data.length > 0;
-    if ("records" in data) return (data.records?.length ?? 0) > 0;
-    if ("email" in data) return true;
+    // Unexpected status — fail closed
+    const body = await res.text().catch(() => "");
+    logger.warn({ status: res.status, email, body }, "Circle membership check returned unexpected status — denying");
     return false;
   } catch (err) {
-    logger.error({ err, email }, "Circle membership check threw");
+    logger.error({ err, email }, "Circle membership check threw — denying");
     return false;
   }
 }
