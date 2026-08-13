@@ -177,6 +177,7 @@ const filter2: IFilterRule = {
     );
 
     const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
+    const sourceLabel = earningsSourceLabel(stock);
 
     return {
       name: this.name,
@@ -185,10 +186,10 @@ const filter2: IFilterRule = {
       calculatedValue:
         daysUntil < 0
           ? `${Math.abs(daysUntil)}d ago`
-          : `${daysUntil}d (${stock.nextEarningsDate})`,
+          : `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel})`,
       threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
       explanation: passed
-        ? `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — squarely in the 2-week entry window.`
+        ? `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}${sourceLabel}) — squarely in the 2-week entry window.`
         : daysUntil < 0
         ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Next cycle not yet estimated.`
         : daysUntil < EARNINGS_WINDOW_MIN
@@ -371,6 +372,17 @@ const filter4: IFilterRule = {
 
 const FILTER5_THRESHOLD = `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out; no dividend/split before earnings`;
 
+/**
+ * Human-readable suffix indicating whether the stock's earnings date is a
+ * confirmed calendar date or a +91-day estimate. Empty when the provider
+ * predates the earningsDateSource field.
+ */
+function earningsSourceLabel(stock: { earningsDateSource?: "confirmed" | "estimated" | null }): string {
+  if (stock.earningsDateSource === "confirmed") return ", confirmed";
+  if (stock.earningsDateSource === "estimated") return ", estimated";
+  return "";
+}
+
 const filter5: IFilterRule = {
   name: "Filter 5 — Earnings Is the Only Upcoming Event",
   description:
@@ -396,6 +408,7 @@ const filter5: IFilterRule = {
       (earningsDate.getTime() - _today.getTime()) / 86_400_000
     );
     const inWindow = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
+    const sourceLabel = earningsSourceLabel(stock);
 
     if (!inWindow) {
       return {
@@ -405,7 +418,7 @@ const filter5: IFilterRule = {
         calculatedValue:
           daysUntil < 0
             ? `${Math.abs(daysUntil)}d ago`
-            : `${daysUntil}d (${stock.nextEarningsDate})`,
+            : `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel})`,
         threshold: FILTER5_THRESHOLD,
         explanation:
           daysUntil < 0
@@ -425,9 +438,9 @@ const filter5: IFilterRule = {
         name: this.name,
         passed: false,
         bypassed: true,
-        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}) — event data unavailable`,
+        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel}) — event data unavailable`,
         threshold: FILTER5_THRESHOLD,
-        explanation: `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — in the entry window — but the upcoming-events check could not run (event data unavailable). Verify manually that no dividend or split lands before earnings.`,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}${sourceLabel}) — in the entry window — but the upcoming-events check could not run (event data unavailable). Verify manually that no dividend or split lands before earnings.`,
       };
     }
 
@@ -456,9 +469,9 @@ const filter5: IFilterRule = {
       name: this.name,
       passed: true,
       bypassed: false,
-      calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}) — no rival events`,
+      calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel}) — no rival events`,
       threshold: FILTER5_THRESHOLD,
-      explanation: `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}) — in the 2-week entry window, and earnings is the only known upcoming event (no dividends or splits before earnings).`,
+      explanation: `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}${sourceLabel}) — in the 2-week entry window, and earnings is the only known upcoming event (no dividends or splits before earnings).`,
     };
   },
 };

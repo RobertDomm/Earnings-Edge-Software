@@ -19,6 +19,8 @@
  * scan can serve data from cache rather than blocking an HTTP request.
  */
 
+import { getConfirmedEarningsDate } from "./earnings-calendar.js";
+
 /** A structured upcoming corporate event that could rival earnings as a catalyst. */
 export interface UpcomingCorporateEvent {
   type: "dividend" | "split";
@@ -49,6 +51,14 @@ export interface StockQuote {
    * date + 91 days; mock provider uses hardcoded realistic dates.
    */
   nextEarningsDate: string | null;
+  /**
+   * How nextEarningsDate was obtained:
+   *   "confirmed" → from a real earnings calendar (announced date)
+   *   "estimated" → derived from the last quarterly filing date + 91 days
+   *   null        → no earnings date available (nextEarningsDate is null)
+   * Optional so older cached/mocked quotes without the field remain valid.
+   */
+  earningsDateSource?: "confirmed" | "estimated" | null;
   /**
    * Known upcoming corporate events (ex-dividend dates, splits) between today
    * and shortly after earnings. Used by Filter 5 to verify earnings is the
@@ -214,6 +224,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_240_500,
     sector: "tech",
     nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (window: 14–18d)
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451, shortCallStrike: 207.5, shortPutStrike: 172.5, callCalendarPeak: 1.24, putCalendarPeak: 0.98 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
@@ -236,6 +247,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 3_482_100,
     sector: "tech",
     nextEarningsDate: "2026-09-05", // 24 days → FAIL F2
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3 (spread)
     earningsIvHistory: [ // 4/4 rise (solid pattern but fails F2+F3)
@@ -258,6 +270,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 892_300,
     sector: "tech",
     nextEarningsDate: "2026-09-10", // 29 days → FAIL F2
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214, shortCallStrike: 452.5, shortPutStrike: 377.5, callCalendarPeak: 2.87, putCalendarPeak: 2.41 }, // FAIL F2 (earnings 29d away)
     earningsIvHistory: [ // 4/4 rise (would qualify if earnings were in window)
@@ -280,6 +293,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 4_821_600,
     sector: "automotive",
     nextEarningsDate: "2026-08-27", // 15 days → PASS F2 (but fails F4)
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948, shortCallStrike: 272.5, shortPutStrike: 225.0, callCalendarPeak: 3.82, putCalendarPeak: 3.14 }, // FAIL F4
     earningsIvHistory: [ // 3/4 rise → FAIL F4 (IV dropped one cycle)
@@ -302,6 +316,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_102_400,
     sector: "tech",
     nextEarningsDate: "2026-08-29", // 17 days → PASS F2
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521, shortCallStrike: 560.0, shortPutStrike: 467.5, callCalendarPeak: 3.42, putCalendarPeak: 2.91 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
@@ -324,6 +339,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_048_300,
     sector: "tech",
     nextEarningsDate: "2026-08-14", // 2 days → FAIL F2 (too close — window opens at 14d)
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281, shortCallStrike: 210.0, shortPutStrike: 177.5, callCalendarPeak: 1.48, putCalendarPeak: 1.22 }, // FAIL F2 (earnings 2d away)
     earningsIvHistory: null, // earnings outside window; skip for mock clarity
@@ -341,6 +357,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 2_937_100,
     sector: "tech",
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847, shortCallStrike: 185.0, shortPutStrike: 152.5, callCalendarPeak: 2.31, putCalendarPeak: 1.87 },
     earningsIvHistory: [ // 4/4 rise → PASS F4
@@ -380,6 +397,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 748_600,
     sector: "tech",
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419, shortCallStrike: 197.5, shortPutStrike: 162.5, callCalendarPeak: -0.43, putCalendarPeak: 1.18 }, // FAIL F6 — call peak below zero
     earningsIvHistory: [ // 4/4 rise → PASS F4
@@ -402,6 +420,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     openInterest: 1_823_700,
     sector: "tech",
     nextEarningsDate: "2026-09-01", // 20 days → FAIL F2
+    earningsDateSource: "confirmed",
     upcomingEvents: [],
     liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3
     earningsIvHistory: null,
@@ -1287,6 +1306,33 @@ export async function fetchPolygonEarningsDataCached(
 }
 
 // ---------------------------------------------------------------------------
+// Confirmed-vs-estimated earnings date resolution
+//
+// Providers derive an ESTIMATED next earnings date from Polygon filings
+// (+91 days). This helper overlays the CONFIRMED date from the Nasdaq
+// earnings calendar when one exists, falling back to the estimate otherwise.
+// ---------------------------------------------------------------------------
+
+export interface ResolvedEarningsDate {
+  nextEarningsDate: string | null;
+  earningsDateSource: "confirmed" | "estimated" | null;
+}
+
+/**
+ * Resolves the earnings date for a symbol: confirmed calendar date first,
+ * then the +91-day estimate, then null. Never throws.
+ */
+export async function resolveEarningsDate(
+  symbol: string,
+  estimatedDate: string | null,
+): Promise<ResolvedEarningsDate> {
+  const confirmed = await getConfirmedEarningsDate(symbol);
+  if (confirmed) return { nextEarningsDate: confirmed, earningsDateSource: "confirmed" };
+  if (estimatedDate) return { nextEarningsDate: estimatedDate, earningsDateSource: "estimated" };
+  return { nextEarningsDate: null, earningsDateSource: null };
+}
+
+// ---------------------------------------------------------------------------
 // LiveMarketDataProvider
 // ---------------------------------------------------------------------------
 
@@ -1864,7 +1910,9 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             this.fetchEarningsData(snap.ticker),
             this.fetchUpcomingEvents(snap.ticker),
           ]);
-          const { nextEarningsDate, earningsIvHistory } = earningsData;
+          const { earningsIvHistory } = earningsData;
+          const { nextEarningsDate, earningsDateSource } =
+            await resolveEarningsDate(snap.ticker, earningsData.nextEarningsDate);
 
           enriched.push({
             symbol: snap.ticker,
@@ -1879,6 +1927,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             openInterest: optStats.openInterest,
             sector: TICKER_SECTORS[snap.ticker] ?? "other",
             nextEarningsDate,
+            earningsDateSource,
             upcomingEvents,
             liquidityMetrics: optStats.liquidityMetrics,
             earningsIvHistory,
@@ -1908,7 +1957,9 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         this.fetchEarningsData(symbol),
         this.fetchUpcomingEvents(symbol),
       ]);
-      const { nextEarningsDate, earningsIvHistory } = earningsData;
+      const { earningsIvHistory } = earningsData;
+      const { nextEarningsDate, earningsDateSource } =
+        await resolveEarningsDate(symbol, earningsData.nextEarningsDate);
 
       const snap = snapData.ticker;
       if (!snap) return null;
@@ -1932,6 +1983,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         openInterest: optStats.openInterest,
         sector: TICKER_SECTORS[symbol] ?? "other",
         nextEarningsDate,
+        earningsDateSource,
         upcomingEvents,
         liquidityMetrics: optStats.liquidityMetrics,
         earningsIvHistory,
@@ -2901,6 +2953,10 @@ export class ThetaDataProvider implements IMarketDataProvider {
           })
         : null;
 
+      // Overlay confirmed calendar date on the Polygon estimate. Runs even
+      // without a Polygon key — ThetaData mode gains confirmed dates too.
+      const resolvedEarnings = await resolveEarningsDate(symbol, earningsData.nextEarningsDate);
+
       return {
         symbol,
         company:             TICKER_NAMES[symbol] ?? symbol,
@@ -2913,7 +2969,8 @@ export class ThetaDataProvider implements IMarketDataProvider {
         optionsVolume:       metrics?.optionsVolume     ?? 0,
         openInterest:        metrics?.openInterest      ?? 0,
         sector:              TICKER_SECTORS[symbol] ?? "other",
-        nextEarningsDate:    earningsData.nextEarningsDate,
+        nextEarningsDate:    resolvedEarnings.nextEarningsDate,
+        earningsDateSource:  resolvedEarnings.earningsDateSource,
         upcomingEvents,
         liquidityMetrics:    metrics?.liquidityMetrics ?? null,
         earningsIvHistory:   earningsData.earningsIvHistory,
