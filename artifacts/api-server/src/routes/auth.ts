@@ -9,7 +9,7 @@
 
 import { Router, type IRouter, type Request } from "express";
 import { getAuth as clerkGetAuth } from "@clerk/express";
-import { getUserAuthInfo } from "../lib/circle-membership.js";
+import { getUserAuthInfo, checkEmailMembership } from "../lib/circle-membership.js";
 import { logger } from "../lib/logger.js";
 
 /** Shape expected of any getUserAuthInfo-compatible function. */

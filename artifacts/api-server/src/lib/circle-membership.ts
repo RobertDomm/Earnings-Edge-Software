@@ -34,6 +34,17 @@ export interface ClerkUserRecord {
 }
 
 /**
+ * Checks Circle Space Group membership by email directly.
+ * Used by the preflight endpoint to gate sign-in before Clerk sends a code.
+ */
+export async function checkEmailMembership(
+  email: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<boolean> {
+  return checkCircleMembership(email, fetchImpl);
+}
+
+/**
  * Checks Circle Space Group membership via the Admin v2 API.
  * Accepts an optional `fetchImpl` so tests can inject a mock without
  * mutating the global `fetch` (which would cause inter-suite races).
