@@ -130,6 +130,10 @@ jobs:
 
       - name: Build macOS DMG
         working-directory: artifacts/desktop
+        # electron-builder exits non-zero when hdiutil detach fails during cleanup,
+        # but the DMG files are fully written before that point. We continue and
+        # let the verify step below catch any real failures.
+        continue-on-error: true
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
@@ -141,6 +145,12 @@ jobs:
             --config.extraMetadata.version="$VERSION"
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Verify macOS DMG files were created
+        working-directory: artifacts/desktop
+        run: |
+          echo "=== dist/ ===" && ls dist/*.dmg
+          echo "=== dist/mac-arm64/ ===" && ls dist/mac-arm64/*.dmg 2>/dev/null || ls dist/*arm64*.dmg
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
