@@ -29,9 +29,21 @@ if (!basePath) {
 
 export default defineConfig({
   base: basePath,
+  define: {
+    // Expose the server-side CLERK_PUBLISHABLE_KEY as VITE_CLERK_PUBLISHABLE_KEY
+    // so the frontend can access it without requiring a separate secret.
+    'import.meta.env.VITE_CLERK_PUBLISHABLE_KEY': JSON.stringify(
+      process.env.CLERK_PUBLISHABLE_KEY ?? ''
+    ),
+    // VITE_CLERK_PROXY_URL is empty in dev (Clerk hits FAPI directly) and
+    // should be set to https://<domain>/api/__clerk in production if needed.
+    'import.meta.env.VITE_CLERK_PROXY_URL': JSON.stringify(
+      process.env.VITE_CLERK_PROXY_URL ?? ''
+    ),
+  },
   plugins: [
     react(),
-    tailwindcss(),
+    tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
     ...(process.env.NODE_ENV !== 'production' &&
     process.env.REPL_ID !== undefined

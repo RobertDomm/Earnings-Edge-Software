@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ClerkProvider, SignIn, SignUp } from '@clerk/react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -7,7 +8,6 @@ import NotFound from '@/pages/not-found';
 import Root from '@/pages/root';
 import Dashboard from '@/pages/dashboard';
 import AccessRestricted from '@/pages/access-restricted';
-import Callback from '@/pages/callback';
 import { useTheme } from '@/hooks/use-theme';
 
 import {
@@ -19,6 +19,61 @@ import {
 
 const queryClient = new QueryClient();
 
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+// External Clerk — use the key directly from the environment variable.
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
+
+// Empty in dev (Clerk hits FAPI directly); auto-set in prod via the proxy.
+const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+
+// Clerk passes full paths to routerPush/routerReplace, but wouter's
+// setLocation prepends the base — strip it to avoid doubling.
+function stripBase(path: string): string {
+  return basePath && path.startsWith(basePath)
+    ? path.slice(basePath.length) || '/'
+    : path;
+}
+
+function SignInPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
+      </div>
+      <div className="z-10 flex flex-col items-center gap-3">
+        <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest text-center max-w-xs">
+          Please use your Circle email to verify your authorization
+        </p>
+        <SignIn
+          routing="path"
+          path={`${basePath}/sign-in`}
+          signUpUrl={`${basePath}/sign-up`}
+          fallbackRedirectUrl={`${basePath}/`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SignUpPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
+      </div>
+      <div className="z-10">
+        <SignUp
+          routing="path"
+          path={`${basePath}/sign-up`}
+          signInUrl={`${basePath}/sign-in`}
+          fallbackRedirectUrl={`${basePath}/`}
+        />
+      </div>
+    </div>
+  );
+}
+
 function Router() {
   return (
     <RoutedErrorBoundary>
@@ -26,7 +81,9 @@ function Router() {
         <Route path="/" component={Root} />
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/access-restricted" component={AccessRestricted} />
-        <Route path="/callback" component={Callback} />
+        {/* REQUIRED — /*? optional wildcard matches bare path AND Clerk's OAuth sub-paths */}
+        <Route path="/sign-in/*?" component={SignInPage} />
+        <Route path="/sign-up/*?" component={SignUpPage} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>
@@ -38,18 +95,35 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
 }
 
+function ClerkProviderWithRoutes() {
+  const [, setLocation] = useLocation();
+
+  return (
+    <ClerkProvider
+      publishableKey={clerkPubKey}
+      proxyUrl={clerkProxyUrl}
+      signInUrl={`${basePath}/sign-in`}
+      signUpUrl={`${basePath}/sign-up`}
+      routerPush={(to) => setLocation(stripBase(to))}
+      routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
+    >
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <Router />
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ClerkProvider>
+  );
+}
+
 function App() {
   useTheme(); // Enforces dark mode
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <WouterRouter base={basePath}>
+      <ClerkProviderWithRoutes />
+    </WouterRouter>
   );
 }
 

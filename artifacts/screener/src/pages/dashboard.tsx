@@ -8,10 +8,10 @@ import { useAutoScanner } from "@/hooks/use-auto-scanner";
 import {
   useGetScannerResults,
   useGetMarketStatus,
-  useLogout,
   getGetScannerResultsQueryKey,
   getGetMarketStatusQueryKey,
 } from "@workspace/api-client-react";
+import { useClerk } from "@clerk/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
@@ -103,12 +103,13 @@ export default function Dashboard() {
     },
   });
 
-  const logoutMutation = useLogout();
+  const { signOut } = useClerk();
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const handleLogout = () => {
-    logoutMutation.mutate(undefined, {
-      onSuccess: () => setLocation("/access-restricted"),
-    });
+  const handleLogout = async () => {
+    setIsSigningOut(true);
+    await signOut();
+    setLocation("/sign-in");
   };
 
   // Derive per-filter pass counts (and bypass counts) from the last scan's filterResults.
@@ -158,7 +159,7 @@ export default function Dashboard() {
             variant="ghost"
             size="sm"
             onClick={handleLogout}
-            disabled={logoutMutation.isPending}
+            disabled={isSigningOut}
             className="h-8 rounded-none font-mono text-xs uppercase hover:bg-destructive/20 hover:text-destructive transition-colors"
           >
             <LogOut className="h-4 w-4 mr-2" />

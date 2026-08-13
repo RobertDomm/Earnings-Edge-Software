@@ -1,2 +1,3 @@
 - [ThetaData gRPC column names](thetadata-grpc-field-names.md) — right="CALL"/"PUT" (not "C"/"P"); IV field is "implied_vol" (not "MidIV"); both fixed via tdNormalizeRight() and updated alias list.
 - [Filter bypass for null data](filter-null-bypass.md) — Filters 2, 4, 5 pass (not fail) when earnings/IV data is null; needed for ThetaData mode which never supplies earnings dates or IV history.
+- [External Clerk on Replit](clerk-external-replit.md) — use clerkMiddleware() with no args; do NOT pass getClerkProxyHost() to it or Clerk loads from clerk.{dev-domain} and crashes.

@@ -1,23 +1,20 @@
+import { useAuth } from "@clerk/react";
 import { useLocation } from "wouter";
-import { useGetAuthStatus } from "@workspace/api-client-react";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function Root() {
+  const { isSignedIn, isLoaded } = useAuth();
   const [_, setLocation] = useLocation();
-  const { data: auth, isLoading, error } = useGetAuthStatus();
 
   useEffect(() => {
-    if (!isLoading && auth) {
-      if (auth.authorized) {
-        setLocation("/dashboard");
-      } else {
-        setLocation("/access-restricted");
-      }
-    } else if (!isLoading && error) {
-      setLocation("/access-restricted");
+    if (!isLoaded) return;
+    if (isSignedIn) {
+      setLocation("/dashboard");
+    } else {
+      setLocation("/sign-in");
     }
-  }, [auth, isLoading, error, setLocation]);
+  }, [isLoaded, isSignedIn, setLocation]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">
