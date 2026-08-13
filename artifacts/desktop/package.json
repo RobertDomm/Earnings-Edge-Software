@@ -59,8 +59,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "eesoftware",
-      "repo": "screener"
+      "owner": "RobertDomm",
+      "repo": "Earnings-Edge-Software"
     }
   }
 }
