@@ -937,7 +937,7 @@ interface UniverseCache {
  *
  * No rate limiter: callers are responsible for concurrency control.
  */
-async function fetchPolygonEarningsData(
+export async function fetchPolygonEarningsData(
   apiKey: string,
   ticker: string,
 ): Promise<{ nextEarningsDate: string | null; earningsIvHistory: EarningsIvRecord[] | null }> {

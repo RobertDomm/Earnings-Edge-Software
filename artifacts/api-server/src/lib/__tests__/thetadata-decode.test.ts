@@ -229,6 +229,7 @@ describe("GreeksAll row: underlying_price extraction for stock-price fallback", 
 // ---------------------------------------------------------------------------
 
 import { ScreeningEngine } from "../screening-engine.js";
+import { fetchPolygonEarningsData, ThetaDataProvider } from "../market-data.js";
 import type { StockQuote } from "../market-data.js";
 
 function makeThetaDataStock(overrides: Partial<StockQuote> = {}): StockQuote {
@@ -352,6 +353,580 @@ describe("ThetaData pipeline: qualified_with_caveats when only earnings data is 
         typeof fr.bypassed === "boolean",
         `filterResult '${fr.name}'.bypassed must be boolean, got ${typeof fr.bypassed}`
       );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchPolygonEarningsData — integration probe with stubbed Polygon HTTP
+//
+// Verifies that when both THETADATA_API_KEY and MARKET_DATA_API_KEY are
+// active, the Polygon supplementary call correctly populates
+// nextEarningsDate and earningsIvHistory (non-null).
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a set of synthetic daily price bars for `fetchPolygonEarningsData`
+ * that guarantee non-zero realizedVol in both the pre-earnings window
+ * (daysTo 2–7, high swings → high vol) and the baseline window
+ * (daysTo 15–40, tiny alternation → low vol), so that ivBefore > ivBaseline
+ * for every filing date (ivRose: true for all four cycles).
+ *
+ * Dates are generated from LOCAL midnight timestamps (matching the
+ * `new Date(date + "T00:00:00")` pattern used inside the function).
+ */
+function makeStubBars(filings: string[]): Array<{ t: number; c: number }> {
+  const bars: Array<{ t: number; c: number }> = [];
+  const seenMs = new Set<number>();
+
+  // High-swing prices for the pre-earnings window (6 prices → 5 log-returns)
+  const preClosePrices = [100, 107, 92, 109, 90, 111];
+
+  for (const filing of filings) {
+    // Use local midnight — same convention as fetchPolygonEarningsData
+    const earningsMs = new Date(filing + "T00:00:00").getTime();
+
+    // Pre window: daysTo 7, 6, 5, 4, 3, 2
+    for (let i = 0; i < preClosePrices.length; i++) {
+      const d = 7 - i;
+      const ms = earningsMs - d * 86_400_000;
+      if (!seenMs.has(ms)) {
+        seenMs.add(ms);
+        bars.push({ t: ms, c: preClosePrices[i]! });
+      }
+    }
+
+    // Base window: daysTo 40 down to 15 (26 prices → 25 log-returns)
+    // Alternate 100.1 / 99.9 → small but non-zero variance
+    for (let i = 0; i < 26; i++) {
+      const d = 40 - i;
+      const ms = earningsMs - d * 86_400_000;
+      if (!seenMs.has(ms)) {
+        seenMs.add(ms);
+        bars.push({ t: ms, c: i % 2 === 0 ? 100.1 : 99.9 });
+      }
+    }
+  }
+
+  return bars.sort((a, b) => a.t - b.t);
+}
+
+/**
+ * The four past quarterly filing dates used in the stub.
+ * Most-recent first — the same order Polygon returns them.
+ */
+const STUB_FILINGS = [
+  { filing_date: "2026-05-01" },
+  { filing_date: "2026-02-01" },
+  { filing_date: "2025-11-01" },
+  { filing_date: "2025-08-01" },
+];
+
+const STUB_BARS = makeStubBars(STUB_FILINGS.map((f) => f.filing_date));
+
+/**
+ * Minimal `Response`-compatible object for Node.js's built-in fetch mock.
+ */
+function makeJsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? "OK" : "Error",
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  } as unknown as Response;
+}
+
+describe("fetchPolygonEarningsData — stub Polygon HTTP (both API keys active)", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  // Install a deterministic fetch stub before each test in this suite.
+  // Restored after each test so other suites are unaffected.
+  function installStubFetch(): void {
+    originalFetch = globalThis.fetch;
+    const stub: typeof globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) {
+        return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      }
+      if (url.includes("/v2/aggs/ticker/")) {
+        return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+    globalThis.fetch = stub;
+  }
+
+  function restoreFetch(): void {
+    globalThis.fetch = originalFetch;
+  }
+
+  it("returns non-null nextEarningsDate when Polygon returns 4 quarterly filings", async () => {
+    installStubFetch();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      assert.ok(
+        result.nextEarningsDate !== null,
+        `nextEarningsDate must be non-null when Polygon returns 4 filings (got ${result.nextEarningsDate})`
+      );
+      // Should be the most-recent filing date + 91 days
+      assert.match(
+        result.nextEarningsDate!,
+        /^\d{4}-\d{2}-\d{2}$/,
+        "nextEarningsDate must be a YYYY-MM-DD string"
+      );
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("returns non-null earningsIvHistory with 4 records when price aggregates cover all windows", async () => {
+    installStubFetch();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      assert.ok(
+        result.earningsIvHistory !== null,
+        "earningsIvHistory must be non-null when 4 filings and covering price bars are provided"
+      );
+      assert.equal(
+        result.earningsIvHistory!.length,
+        4,
+        `earningsIvHistory must contain 4 records (one per filing) — got ${result.earningsIvHistory!.length}`
+      );
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("each EarningsIvRecord has numeric ivBeforeEarnings, ivBaseline, and boolean ivRose", async () => {
+    installStubFetch();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      for (const rec of result.earningsIvHistory ?? []) {
+        assert.ok(
+          typeof rec.ivBeforeEarnings === "number" && rec.ivBeforeEarnings > 0,
+          `ivBeforeEarnings must be a positive number (got ${rec.ivBeforeEarnings})`
+        );
+        assert.ok(
+          typeof rec.ivBaseline === "number" && rec.ivBaseline > 0,
+          `ivBaseline must be a positive number (got ${rec.ivBaseline})`
+        );
+        assert.equal(typeof rec.ivRose, "boolean", "ivRose must be boolean");
+      }
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("ivBeforeEarnings > ivBaseline for all 4 cycles (high pre-earnings vol confirmed)", async () => {
+    installStubFetch();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      for (const rec of result.earningsIvHistory ?? []) {
+        assert.ok(
+          rec.ivBeforeEarnings > rec.ivBaseline,
+          `Expected ivBeforeEarnings (${rec.ivBeforeEarnings}) > ivBaseline (${rec.ivBaseline}) for ${rec.earningsDate}`
+        );
+        assert.equal(rec.ivRose, true, `ivRose must be true when ivBeforeEarnings > ivBaseline (${rec.earningsDate})`);
+      }
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("returns null nextEarningsDate and null earningsIvHistory when Polygon financials call fails", async () => {
+    installStubFetch();
+    // Override: financials returns HTTP 500
+    const failFinancials: typeof globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) {
+        return makeJsonResponse({ error: "internal error" }, 500);
+      }
+      return makeJsonResponse({ results: STUB_BARS }, 200);
+    };
+    globalThis.fetch = failFinancials;
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      assert.equal(result.nextEarningsDate, null, "nextEarningsDate must be null when financials call fails");
+      assert.equal(result.earningsIvHistory, null, "earningsIvHistory must be null when financials call fails");
+    } finally {
+      restoreFetch();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ScreeningEngine: Filters 2, 4, 5 not bypassed when both API keys are active
+//
+// Simulates the StockQuote that ThetaDataProvider.enrichTicker produces when
+// MARKET_DATA_API_KEY is set alongside THETADATA_API_KEY.  Both earnings
+// fields are non-null, so the filters must evaluate (bypassed: false)
+// regardless of whether they pass or fail.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stock shaped as ThetaDataProvider.enrichTicker would return it when
+ * both THETADATA_API_KEY and MARKET_DATA_API_KEY are set.
+ * Earnings date is squarely in the 14–18 day window so F2 and F5 also pass.
+ */
+/** Returns a YYYY-MM-DD string that is `days` calendar days from today. */
+function daysFromToday(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0]!;
+}
+
+function makeThetaDataStockWithPolygon(overrides: Partial<StockQuote> = {}): StockQuote {
+  return {
+    // Use the same structural base as makeThetaDataStock() …
+    ...makeThetaDataStock(),
+    // … but override the two fields that Polygon now supplies:
+    nextEarningsDate:  daysFromToday(14),  // always 14 days from today → inside F2/F5 window
+    earningsIvHistory: [              // 4/4 ivRose → F4 passes
+      { earningsDate: "2025-08-01", ivBaseline: 0.28, ivBeforeEarnings: 0.45, ivRose: true },
+      { earningsDate: "2025-11-01", ivBaseline: 0.31, ivBeforeEarnings: 0.49, ivRose: true },
+      { earningsDate: "2026-02-01", ivBaseline: 0.26, ivBeforeEarnings: 0.42, ivRose: true },
+      { earningsDate: "2026-05-01", ivBaseline: 0.29, ivBeforeEarnings: 0.46, ivRose: true },
+    ],
+    ...overrides,
+  };
+}
+
+describe("ThetaData + Polygon mode: Filters 2, 4, 5 not bypassed when earnings data is present", () => {
+  const engine = new ScreeningEngine();
+
+  it("Filter 2 has bypassed:false when nextEarningsDate is non-null", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    const f2 = result.filterResults[1];
+    assert.equal(
+      f2.bypassed,
+      false,
+      `Filter 2 must NOT be bypassed when nextEarningsDate is present (got bypassed=${f2.bypassed}, explanation="${f2.explanation}")`
+    );
+  });
+
+  it("Filter 4 has bypassed:false when earningsIvHistory is non-null", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    const f4 = result.filterResults[3];
+    assert.equal(
+      f4.bypassed,
+      false,
+      `Filter 4 must NOT be bypassed when earningsIvHistory is present (got bypassed=${f4.bypassed}, explanation="${f4.explanation}")`
+    );
+  });
+
+  it("Filter 5 has bypassed:false when nextEarningsDate is non-null", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    const f5 = result.filterResults[4];
+    assert.equal(
+      f5.bypassed,
+      false,
+      `Filter 5 must NOT be bypassed when nextEarningsDate is present (got bypassed=${f5.bypassed}, explanation="${f5.explanation}")`
+    );
+  });
+
+  it("Filter 2 genuinely passes when earnings date is 14 days out", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    const f2 = result.filterResults[1];
+    assert.equal(f2.passed, true, `Filter 2 must pass when earnings are 14 days away (got: ${f2.explanation})`);
+  });
+
+  it("Filter 4 genuinely passes when all 4 IV cycles show ivRose:true", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    const f4 = result.filterResults[3];
+    assert.equal(f4.passed, true, `Filter 4 must pass with 4/4 ivRose cycles (got: ${f4.explanation})`);
+  });
+
+  it("Filter 5 genuinely passes when earnings date is 14 days out", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    const f5 = result.filterResults[4];
+    assert.equal(f5.passed, true, `Filter 5 must pass when earnings are 14 days away (got: ${f5.explanation})`);
+  });
+
+  it("stock is fully qualified (not just caveats) when all 6 filters pass", () => {
+    const result = engine.evaluateStock(makeThetaDataStockWithPolygon());
+    assert.equal(
+      result.status,
+      "qualified",
+      `Expected status=qualified when all 6 filters pass (got: ${result.status})`
+    );
+    assert.equal(result.qualified, true, "qualified must be true");
+    assert.equal(result.qualifiedWithCaveats, false, "qualifiedWithCaveats must be false when no filter was bypassed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Graceful degradation: when polygonApiKey is null (MARKET_DATA_API_KEY not
+// set), ThetaDataProvider leaves nextEarningsDate and earningsIvHistory as
+// null.  Filters 2, 4, 5 must continue to bypass rather than crash.
+// ---------------------------------------------------------------------------
+
+describe("Graceful degradation: null polygonApiKey → Filters 2, 4, 5 still bypass (no crash)", () => {
+  const engine = new ScreeningEngine();
+
+  it("Filter 2 is bypassed (not failed) when nextEarningsDate is null (no Polygon key)", () => {
+    // makeThetaDataStock() produces null nextEarningsDate — models polygonApiKey:null
+    const result = engine.evaluateStock(makeThetaDataStock({ nextEarningsDate: null }));
+    const f2 = result.filterResults[1];
+    assert.equal(f2.bypassed, true,  "Filter 2 must be bypassed when nextEarningsDate is null");
+    assert.equal(f2.passed,   false, "bypassed filter must have passed:false");
+  });
+
+  it("Filter 4 is bypassed (not failed) when earningsIvHistory is null (no Polygon key)", () => {
+    const result = engine.evaluateStock(makeThetaDataStock({ earningsIvHistory: null }));
+    const f4 = result.filterResults[3];
+    assert.equal(f4.bypassed, true,  "Filter 4 must be bypassed when earningsIvHistory is null");
+    assert.equal(f4.passed,   false, "bypassed filter must have passed:false");
+  });
+
+  it("Filter 5 is bypassed (not failed) when nextEarningsDate is null (no Polygon key)", () => {
+    const result = engine.evaluateStock(makeThetaDataStock({ nextEarningsDate: null }));
+    const f5 = result.filterResults[4];
+    assert.equal(f5.bypassed, true,  "Filter 5 must be bypassed when nextEarningsDate is null");
+    assert.equal(f5.passed,   false, "bypassed filter must have passed:false");
+  });
+
+  it("status is qualified_with_caveats (not not_qualified) — bypass does not disqualify", () => {
+    const result = engine.evaluateStock(makeThetaDataStock());
+    assert.equal(
+      result.status,
+      "qualified_with_caveats",
+      `Expected qualified_with_caveats when only earnings data is absent (got: ${result.status})`
+    );
+  });
+
+  it("evaluateStock does not throw when both earnings fields are null", () => {
+    assert.doesNotThrow(() => {
+      engine.evaluateStock(makeThetaDataStock({ nextEarningsDate: null, earningsIvHistory: null }));
+    }, "evaluateStock must not throw when earnings data is null (polygonApiKey: null path)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provider-level wiring test: ThetaDataProvider.enrichTicker propagates
+// Polygon earnings data when polygonApiKey is non-null
+//
+// This verifies the critical wiring inside enrichTicker — the path from
+// "polygonApiKey is set" → "fetchPolygonEarningsData is called" → "the
+// resulting nextEarningsDate and earningsIvHistory reach the StockQuote".
+// A regression that broke this propagation would silently keep returning
+// null earnings fields even when MARKET_DATA_API_KEY is configured.
+//
+// Approach: construct a real ThetaDataProvider with a stub fetch (covering
+// ThetaData auth + Polygon endpoints) and a stub getOptionSnapshot (bypasses
+// the gRPC layer), then invoke the private enrichTicker via cast.
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal ThetaData GreeksAll row — enough for enrichTicker to proceed past
+ * the `if (quoteRows.length === 0 && greekRows.length === 0) return null` guard.
+ */
+const PROVIDER_GREEK_ROW = {
+  Strike:           600,
+  Right:            "CALL",
+  Expiration:       "2026-10-10",
+  implied_vol:      0.35,
+  underlying_price: 595.0,
+  Delta:            0.35,
+};
+
+describe("ThetaDataProvider.enrichTicker wiring: polygonApiKey propagates to StockQuote", () => {
+  it("quote.nextEarningsDate is non-null when polygonApiKey is set (end-to-end wiring confirmed)", async () => {
+    const origFetch = globalThis.fetch;
+
+    // Install stub before constructing ThetaDataProvider — doInit() runs immediately
+    // in the constructor and calls fetch for the ThetaData auth.
+    const stubFetch: typeof globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      // ThetaData nexus auth
+      if (url.includes("nexus-api.thetadata.us")) {
+        return makeJsonResponse({ sessionId: "stub-session", user: { email: "stub@test.com" } });
+      }
+      // Polygon financials → 4 quarterly filings
+      if (url.includes("/vX/reference/financials")) {
+        return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      }
+      // Polygon price aggregates → synthetic bars
+      if (url.includes("/v2/aggs/ticker/")) {
+        return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised" }, 404);
+    };
+    globalThis.fetch = stubFetch;
+
+    try {
+      // cacheTtlSeconds=0 keeps the cache always stale (won't auto-refresh in test).
+      // polygonApiKey="stub-poly-key" is the key condition being tested.
+      const provider = new ThetaDataProvider("stub-td-key", 0, "stub-poly-key");
+
+      // Override getOptionSnapshot AFTER construction so enrichTicker never reaches
+      // the real gRPC layer.  Return one GreeksAll row so the null-check passes.
+      (provider as any).getOptionSnapshot = async (type: string) =>
+        type === "GreeksAll" ? [PROVIDER_GREEK_ROW] : [];
+
+      // Wait for doInit() to settle (auth succeeds via stub).
+      await (provider as any).initPromise.catch(() => {});
+
+      // Pre-built Yahoo data map (enrichTicker takes it as a parameter).
+      const yahooMap = new Map([
+        ["META", { price: 595, changePercent: 0.8, volume: 18_000_000, avgVolume: 20_000_000, marketCap: 1_500_000_000_000 }],
+      ]);
+
+      const quote: StockQuote | null = await (provider as any).enrichTicker("META", yahooMap, Date.now());
+
+      assert.ok(
+        quote !== null,
+        "enrichTicker must return a non-null StockQuote when GreeksAll rows are present"
+      );
+      assert.ok(
+        quote!.nextEarningsDate !== null,
+        `nextEarningsDate must be non-null when polygonApiKey is set — ` +
+        `a null here means enrichTicker is not calling fetchPolygonEarningsData ` +
+        `(got ${quote!.nextEarningsDate})`
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("quote.earningsIvHistory is non-null when polygonApiKey is set and price bars cover all windows", async () => {
+    const origFetch = globalThis.fetch;
+
+    const stubFetch: typeof globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("nexus-api.thetadata.us")) {
+        return makeJsonResponse({ sessionId: "stub-session", user: { email: "stub@test.com" } });
+      }
+      if (url.includes("/vX/reference/financials")) {
+        return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      }
+      if (url.includes("/v2/aggs/ticker/")) {
+        return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised" }, 404);
+    };
+    globalThis.fetch = stubFetch;
+
+    try {
+      const provider = new ThetaDataProvider("stub-td-key", 0, "stub-poly-key");
+      (provider as any).getOptionSnapshot = async (type: string) =>
+        type === "GreeksAll" ? [PROVIDER_GREEK_ROW] : [];
+      await (provider as any).initPromise.catch(() => {});
+
+      const yahooMap = new Map([
+        ["META", { price: 595, changePercent: 0.8, volume: 18_000_000, avgVolume: 20_000_000, marketCap: 1_500_000_000_000 }],
+      ]);
+      const quote: StockQuote | null = await (provider as any).enrichTicker("META", yahooMap, Date.now());
+
+      assert.ok(quote !== null, "enrichTicker must return a non-null StockQuote");
+      assert.ok(
+        quote!.earningsIvHistory !== null,
+        `earningsIvHistory must be non-null when polygonApiKey is set and price bars cover all windows ` +
+        `(got ${JSON.stringify(quote!.earningsIvHistory)})`
+      );
+      assert.equal(
+        quote!.earningsIvHistory!.length,
+        4,
+        `earningsIvHistory must contain 4 records (got ${quote!.earningsIvHistory!.length})`
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("Filters 2, 4, 5 have bypassed:false on the StockQuote produced by enrichTicker with polygonApiKey set", async () => {
+    const origFetch = globalThis.fetch;
+
+    const stubFetch: typeof globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("nexus-api.thetadata.us")) {
+        return makeJsonResponse({ sessionId: "stub-session", user: { email: "stub@test.com" } });
+      }
+      if (url.includes("/vX/reference/financials")) {
+        return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      }
+      if (url.includes("/v2/aggs/ticker/")) {
+        return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised" }, 404);
+    };
+    globalThis.fetch = stubFetch;
+
+    try {
+      const provider = new ThetaDataProvider("stub-td-key", 0, "stub-poly-key");
+      (provider as any).getOptionSnapshot = async (type: string) =>
+        type === "GreeksAll" ? [PROVIDER_GREEK_ROW] : [];
+      await (provider as any).initPromise.catch(() => {});
+
+      const yahooMap = new Map([
+        ["META", { price: 595, changePercent: 0.8, volume: 18_000_000, avgVolume: 20_000_000, marketCap: 1_500_000_000_000 }],
+      ]);
+      const quote: StockQuote | null = await (provider as any).enrichTicker("META", yahooMap, Date.now());
+      assert.ok(quote !== null, "enrichTicker must return a non-null StockQuote");
+
+      // Run the real ScreeningEngine on the quote produced by enrichTicker
+      const engine = new ScreeningEngine();
+      const result = engine.evaluateStock(quote!);
+
+      const [f2, f4, f5] = [result.filterResults[1], result.filterResults[3], result.filterResults[4]];
+
+      assert.equal(
+        f2.bypassed, false,
+        `Filter 2 must not be bypassed on a quote produced by enrichTicker with polygonApiKey set ` +
+        `(got bypassed=${f2.bypassed}, explanation="${f2.explanation}")`
+      );
+      assert.equal(
+        f4.bypassed, false,
+        `Filter 4 must not be bypassed on a quote produced by enrichTicker with polygonApiKey set ` +
+        `(got bypassed=${f4.bypassed}, explanation="${f4.explanation}")`
+      );
+      assert.equal(
+        f5.bypassed, false,
+        `Filter 5 must not be bypassed on a quote produced by enrichTicker with polygonApiKey set ` +
+        `(got bypassed=${f5.bypassed}, explanation="${f5.explanation}")`
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it("quote.nextEarningsDate and earningsIvHistory are null when polygonApiKey is null (no Polygon key)", async () => {
+    const origFetch = globalThis.fetch;
+
+    // Stub only the ThetaData auth; Polygon endpoints must NOT be called
+    const stubFetch: typeof globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("nexus-api.thetadata.us")) {
+        return makeJsonResponse({ sessionId: "stub-session", user: { email: "stub@test.com" } });
+      }
+      // Polygon calls must not reach here; if they do, return 403 to surface the bug
+      return makeJsonResponse({ error: "unexpected Polygon call when polygonApiKey is null" }, 403);
+    };
+    globalThis.fetch = stubFetch;
+
+    try {
+      // No polygonApiKey (third constructor arg omitted / null)
+      const provider = new ThetaDataProvider("stub-td-key", 0, null);
+      (provider as any).getOptionSnapshot = async (type: string) =>
+        type === "GreeksAll" ? [PROVIDER_GREEK_ROW] : [];
+      await (provider as any).initPromise.catch(() => {});
+
+      const yahooMap = new Map([
+        ["META", { price: 595, changePercent: 0.8, volume: 18_000_000, avgVolume: 20_000_000, marketCap: 1_500_000_000_000 }],
+      ]);
+      const quote: StockQuote | null = await (provider as any).enrichTicker("META", yahooMap, Date.now());
+
+      assert.ok(quote !== null, "enrichTicker must return a non-null StockQuote");
+      assert.equal(
+        quote!.nextEarningsDate, null,
+        "nextEarningsDate must be null when polygonApiKey is null"
+      );
+      assert.equal(
+        quote!.earningsIvHistory, null,
+        "earningsIvHistory must be null when polygonApiKey is null"
+      );
+    } finally {
+      globalThis.fetch = origFetch;
     }
   });
 });
