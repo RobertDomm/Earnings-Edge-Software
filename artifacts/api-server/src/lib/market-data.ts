@@ -1163,18 +1163,29 @@ export function clearPolygonEarningsCache(): void {
  * Returns [] when the lookup succeeds and no events are scheduled, or null
  * when the lookup fails (logged with a classified reason). Never throws.
  */
+export interface PolygonEventsFetchOptions extends PolygonEarningsFetchOptions {
+  /**
+   * Awaited before every HTTP request (including retries). Callers with a
+   * rate limiter pass its acquire() here so event lookups share the same
+   * request budget instead of bypassing it.
+   */
+  acquireSlot?: () => Promise<void>;
+}
+
 export async function fetchPolygonUpcomingEvents(
   apiKey: string,
   ticker: string,
-  opts: PolygonEarningsFetchOptions = {},
+  opts: PolygonEventsFetchOptions = {},
 ): Promise<UpcomingCorporateEvent[] | null> {
   const baseUrl = "https://api.polygon.io";
   const maxRetries = opts.retries ?? 2;
   const retryBaseMs = opts.retryBaseMs ?? 250;
+  const acquireSlot = opts.acquireSlot;
 
   async function polyFetch<T>(path: string, params: Record<string, string>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
+        if (acquireSlot) await acquireSlot();
         const url = new URL(`${baseUrl}${path}`);
         url.searchParams.set("apiKey", apiKey);
         for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -1245,7 +1256,7 @@ export function clearPolygonEventsCache(): void {
 export async function fetchPolygonUpcomingEventsCached(
   apiKey: string,
   ticker: string,
-  opts: PolygonEarningsFetchOptions = {},
+  opts: PolygonEventsFetchOptions = {},
 ): Promise<UpcomingCorporateEvent[] | null> {
   const hit = polygonEventsCache.get(ticker);
   if (hit && Date.now() - hit.fetchedAt < POLYGON_EARNINGS_CACHE_TTL_MS) return hit.data;
@@ -1583,6 +1594,18 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     return fetchPolygonEarningsDataCached(this.apiKey, ticker);
   }
 
+  /**
+   * Upcoming corporate events (dividends/splits) for Filter 5, routed through
+   * this provider's rate limiter so bulk universe scans cannot exceed the
+   * configured Polygon request budget. 24h-cached per ticker, so only the
+   * first scan of the day pays the extra requests.
+   */
+  private async fetchUpcomingEvents(ticker: string): Promise<UpcomingCorporateEvent[] | null> {
+    return fetchPolygonUpcomingEventsCached(this.apiKey, ticker, {
+      acquireSlot: this.limiter ? () => this.limiter!.acquire() : undefined,
+    });
+  }
+
   private async fetchOptionsStats(ticker: string): Promise<{
     optionsVolume: number;
     openInterest: number;
@@ -1839,7 +1862,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             this.fetchOptionsStats(snap.ticker),
             this.fetchAvgVolume(snap.ticker),
             this.fetchEarningsData(snap.ticker),
-            fetchPolygonUpcomingEventsCached(this.apiKey, snap.ticker),
+            this.fetchUpcomingEvents(snap.ticker),
           ]);
           const { nextEarningsDate, earningsIvHistory } = earningsData;
 
@@ -1883,7 +1906,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         this.fetchOptionsStats(symbol),
         this.fetchAvgVolume(symbol),
         this.fetchEarningsData(symbol),
-        fetchPolygonUpcomingEventsCached(this.apiKey, symbol),
+        this.fetchUpcomingEvents(symbol),
       ]);
       const { nextEarningsDate, earningsIvHistory } = earningsData;
 

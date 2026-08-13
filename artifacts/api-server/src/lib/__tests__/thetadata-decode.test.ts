@@ -757,6 +757,75 @@ describe("fetchPolygonEarningsDataCached — per-ticker 24h cache", () => {
     }
   });
 
+  it("upcoming-events: acquireSlot is awaited before every HTTP request and skipped on cache hits", async () => {
+    clearPolygonEventsCache();
+    originalFetch = globalThis.fetch;
+    let slotAcquisitions = 0;
+    let httpCalls = 0;
+    globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      httpCalls++;
+      assert.ok(slotAcquisitions >= httpCalls, "every HTTP request must acquire a limiter slot first");
+      if (url.includes("/v3/reference/dividends") || url.includes("/v3/reference/splits")) {
+        return makeJsonResponse({ results: [] });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+    const acquireSlot = async () => { slotAcquisitions++; };
+    try {
+      await fetchPolygonUpcomingEventsCached("stub-key", "META", { retryBaseMs: 1, acquireSlot });
+      assert.equal(httpCalls, 2, "dividends + splits = two HTTP requests");
+      assert.equal(slotAcquisitions, 2, "each of the two requests must consume exactly one limiter slot");
+      await fetchPolygonUpcomingEventsCached("stub-key", "META", { retryBaseMs: 1, acquireSlot });
+      assert.equal(slotAcquisitions, 2, "cache hits must not consume limiter slots");
+      assert.equal(httpCalls, 2, "cache hits must not issue HTTP requests");
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearPolygonEventsCache();
+    }
+  });
+
+  it("LiveMarketDataProvider bulk scan: event requests go through the provider's rate limiter", async () => {
+    clearPolygonEventsCache();
+    originalFetch = globalThis.fetch;
+    let slotAcquisitions = 0;
+    globalThis.fetch = async (input) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/v3/reference/dividends") || url.includes("/v3/reference/splits")) {
+        return makeJsonResponse({ results: [] });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    };
+    try {
+      const { LiveMarketDataProvider } = await import("../market-data.js");
+      // requestsPerMinute > 0 so the provider constructs a real limiter…
+      const provider = new LiveMarketDataProvider("stub-key", 6000, 300);
+      // …then replace it with a counting stub to observe acquisitions.
+      (provider as unknown as { limiter: { acquire(): Promise<void> } }).limiter = {
+        acquire: async () => { slotAcquisitions++; },
+      };
+      const fetchEvents = (provider as unknown as {
+        fetchUpcomingEvents(t: string): Promise<unknown>;
+      }).fetchUpcomingEvents.bind(provider);
+
+      // Simulate a bulk scan over several tickers.
+      const tickers = ["AAPL", "MSFT", "NVDA"];
+      await Promise.all(tickers.map((t) => fetchEvents(t)));
+      assert.equal(
+        slotAcquisitions,
+        tickers.length * 2,
+        "every event HTTP request in a bulk scan must consume a limiter slot (2 per ticker)"
+      );
+
+      // Second scan: all tickers cached — no additional limiter pressure.
+      await Promise.all(tickers.map((t) => fetchEvents(t)));
+      assert.equal(slotAcquisitions, tickers.length * 2, "cached scans must not consume limiter slots");
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearPolygonEventsCache();
+    }
+  });
+
   it("upcoming-events: second lookup for the same ticker is served from the 24h cache", async () => {
     clearPolygonEventsCache();
     originalFetch = globalThis.fetch;
