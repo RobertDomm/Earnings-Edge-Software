@@ -102,7 +102,7 @@ function SignInPage() {
           path={`${basePath}/sign-in`}
           signUpUrl={`${basePath}/sign-up`}
           fallbackRedirectUrl={`${basePath}/`}
-          appearance={{ elements: { footerAction: { display: 'none' }, formFieldLabel: { display: 'none' } } }}
+          appearance={{ elements: { footerAction: { display: 'none' }, formFieldLabel: { display: 'none' }, headerTitle: { whiteSpace: 'pre-wrap' } } }}
         />
       </div>
     </div>
@@ -159,7 +159,7 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
-      localization={{ signIn: { start: { title: 'Welcome to the Earnings Edge Software', subtitle: '' } } }}
+      localization={{ signIn: { start: { title: 'Welcome to\nThe Earnings Edge Software', subtitle: '' } } }}
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
