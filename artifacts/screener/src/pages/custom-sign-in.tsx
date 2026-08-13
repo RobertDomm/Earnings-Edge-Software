@@ -28,8 +28,39 @@ type PreflightResult = 'authorized' | 'unauthorized' | 'unavailable';
  * `{ error: ClerkError | null }`.  A `null` error means success.
  * This helper turns a ClerkError into a user-displayable message.
  */
-function clerkErrorMessage(err: { longMessage?: string; message?: string } | null, fallback: string): string {
-  return err?.longMessage || err?.message || fallback;
+type ClerkErrorLike = {
+  code?: string;
+  longMessage?: string;
+  message?: string;
+  errors?: Array<{ code?: string; longMessage?: string; message?: string }>;
+} | null;
+
+function clerkErrorMessage(err: ClerkErrorLike, fallback: string): string {
+  // API failures surface as ClerkAPIResponseError: the useful longMessage is
+  // nested in err.errors[], while the top-level message is generic.
+  const nested = err?.errors?.[0];
+  return (
+    nested?.longMessage ||
+    nested?.message ||
+    err?.longMessage ||
+    err?.message ||
+    fallback
+  );
+}
+
+/**
+ * Collects every error code from a Clerk error. API failures resolve to a
+ * ClerkAPIResponseError whose top-level `code` is always the generic
+ * "api_response_error" — the specific code (e.g. "form_identifier_not_found")
+ * is nested in `error.errors[].code`. Check both.
+ */
+function clerkErrorCodes(err: ClerkErrorLike): string[] {
+  const codes: string[] = [];
+  if (err?.code) codes.push(err.code);
+  for (const nested of err?.errors ?? []) {
+    if (nested?.code) codes.push(nested.code);
+  }
+  return codes;
 }
 
 async function preflightCircleCheck(email: string): Promise<PreflightResult> {
@@ -145,7 +176,7 @@ export default function CustomSignInPage() {
       }
 
       // Step 2b: No Clerk account yet — create one and send verification code
-      if (sendError.code === 'form_identifier_not_found') {
+      if (clerkErrorCodes(sendError).includes('form_identifier_not_found')) {
         const { error: createError } = await signUp.create({
           emailAddress: trimmedEmail,
         });

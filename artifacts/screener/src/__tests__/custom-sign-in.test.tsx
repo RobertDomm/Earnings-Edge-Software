@@ -65,8 +65,18 @@ function mockPreflight(authorized = true, status = 200) {
   );
 }
 
+/**
+ * Shaped like a real ClerkAPIResponseError: the top-level `code` is always the
+ * generic "api_response_error"; the specific code and longMessage live in the
+ * nested `errors` array. (The original regression: matching the top-level code
+ * against "form_identifier_not_found" never fires.)
+ */
 function clerkError(code: string, longMessage?: string) {
-  return { code, message: code, longMessage };
+  return {
+    code: "api_response_error",
+    message: longMessage ?? code,
+    errors: [{ code, message: code, longMessage }],
+  };
 }
 
 async function submitEmail(email = "newuser@example.com") {
