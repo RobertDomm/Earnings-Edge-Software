@@ -23,6 +23,15 @@ import { useLocation } from 'wouter';
 
 type PreflightResult = 'authorized' | 'unauthorized' | 'unavailable';
 
+/**
+ * Clerk v6 Future API methods do NOT throw on API errors — they resolve to
+ * `{ error: ClerkError | null }`.  A `null` error means success.
+ * This helper turns a ClerkError into a user-displayable message.
+ */
+function clerkErrorMessage(err: { longMessage?: string; message?: string } | null, fallback: string): string {
+  return err?.longMessage || err?.message || fallback;
+}
+
 async function preflightCircleCheck(email: string): Promise<PreflightResult> {
   try {
     const res = await fetch(`${window.location.origin}/api/auth/preflight`, {
@@ -124,24 +133,40 @@ export default function CustomSignInPage() {
         return;
       }
 
-      // Step 2a: Try sending a code for an existing Clerk user
-      try {
-        await signIn.emailCode.sendCode({ emailAddress: trimmedEmail });
+      // Step 2a: Try sending a code for an existing Clerk user.
+      // Clerk's Future API resolves to { error } instead of throwing.
+      const { error: sendError } = await signIn.emailCode.sendCode({
+        emailAddress: trimmedEmail,
+      });
+      if (!sendError) {
         setIsNewUser(false);
         setStep('code');
-      } catch (signInErr: any) {
-        const errCode = signInErr?.errors?.[0]?.code;
-        // Step 2b: No Clerk account yet — create one and send verification code
-        if (errCode === 'form_identifier_not_found') {
-          await signUp.create({ emailAddress: trimmedEmail });
-          await signUp.verifications.sendEmailCode();
-          setIsNewUser(true);
-          setStep('code');
-        } else {
-          throw signInErr;
-        }
+        return;
       }
+
+      // Step 2b: No Clerk account yet — create one and send verification code
+      if (sendError.code === 'form_identifier_not_found') {
+        const { error: createError } = await signUp.create({
+          emailAddress: trimmedEmail,
+        });
+        if (createError) {
+          setError(clerkErrorMessage(createError, 'Could not create your account. Please try again.'));
+          return;
+        }
+        const { error: signUpSendError } = await signUp.verifications.sendEmailCode();
+        if (signUpSendError) {
+          setError(clerkErrorMessage(signUpSendError, 'Could not send the verification code. Please try again.'));
+          return;
+        }
+        setIsNewUser(true);
+        setStep('code');
+        return;
+      }
+
+      // Any other send failure: stay on the email step and show the error.
+      setError(clerkErrorMessage(sendError, 'Could not send the verification code. Please try again.'));
     } catch (err: any) {
+      // Unexpected (network/runtime) failure — Future API errors are handled above.
       const msg =
         err?.errors?.[0]?.longMessage ||
         err?.errors?.[0]?.message ||
@@ -161,16 +186,40 @@ export default function CustomSignInPage() {
 
     try {
       if (isNewUser) {
-        await signUp.verifications.verifyEmailCode({ code: code.trim() });
+        const { error: verifyError } = await signUp.verifications.verifyEmailCode({
+          code: code.trim(),
+        });
+        if (verifyError) {
+          setError(clerkErrorMessage(verifyError, 'Invalid code. Please try again.'));
+          return;
+        }
         if (signUp.status === 'complete') {
-          await signUp.finalize();
+          const { error: finalizeError } = await signUp.finalize();
+          if (finalizeError) {
+            setError(clerkErrorMessage(finalizeError, 'Could not complete sign-up. Please try again.'));
+            return;
+          }
           navigate('/');
+        } else {
+          setError('Verification incomplete. Please try again.');
         }
       } else {
-        await signIn.emailCode.verifyCode({ code: code.trim() });
+        const { error: verifyError } = await signIn.emailCode.verifyCode({
+          code: code.trim(),
+        });
+        if (verifyError) {
+          setError(clerkErrorMessage(verifyError, 'Invalid code. Please try again.'));
+          return;
+        }
         if (signIn.status === 'complete') {
-          await signIn.finalize();
+          const { error: finalizeError } = await signIn.finalize();
+          if (finalizeError) {
+            setError(clerkErrorMessage(finalizeError, 'Could not complete sign-in. Please try again.'));
+            return;
+          }
           navigate('/');
+        } else {
+          setError('Verification incomplete. Please try again.');
         }
       }
     } catch (err: any) {
@@ -191,11 +240,14 @@ export default function CustomSignInPage() {
     setError('');
 
     try {
-      if (isNewUser) {
-        await signUp.verifications.sendEmailCode();
-      } else {
-        // No params — resends to the identifier already set on the signIn
-        await signIn.emailCode.sendCode();
+      const { error: resendError } = isNewUser
+        ? await signUp.verifications.sendEmailCode()
+        : // No params — resends to the identifier already set on the signIn
+          await signIn.emailCode.sendCode();
+      if (resendError) {
+        setResendStatus('idle');
+        setError(clerkErrorMessage(resendError, 'Could not resend the code. Please try again.'));
+        return;
       }
       setResendStatus('sent');
       startCooldown();
