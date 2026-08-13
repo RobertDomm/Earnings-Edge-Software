@@ -24,3 +24,6 @@ timeoutMs = 20000
 [userenv.shared]
 MARKET_DATA_PROVIDER = "thetadata"
 CIRCLE_AUTH_MODE = "clerk"
+
+[userenv.production]
+VITE_CLERK_PROXY_URL = "https://eesoftware.app/api/__clerk"
