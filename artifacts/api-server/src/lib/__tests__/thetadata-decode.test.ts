@@ -685,6 +685,30 @@ describe("fetchPolygonEarningsDataCached — per-ticker 24h cache", () => {
     }
   });
 
+  it("LiveMarketDataProvider.fetchEarningsData reuses the cache across refreshes (no repeat HTTP calls)", async () => {
+    clearPolygonEarningsCache();
+    const counter = { calls: 0 };
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = countingStub(counter);
+    try {
+      const { LiveMarketDataProvider } = await import("../market-data.js");
+      const provider = new LiveMarketDataProvider("stub-key", 0);
+      // Access the private per-ticker earnings helper the refresh cycle uses.
+      const fetchEarnings = (provider as unknown as {
+        fetchEarningsData(t: string): Promise<{ nextEarningsDate: string | null }>;
+      }).fetchEarningsData.bind(provider);
+
+      const first  = await fetchEarnings("META");
+      const second = await fetchEarnings("META");
+      assert.ok(first.nextEarningsDate !== null, "first lookup must succeed");
+      assert.equal(counter.calls, 1, "second refresh must be served from the 24h cache — no repeat financials call");
+      assert.deepEqual(second, first);
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearPolygonEarningsCache();
+    }
+  });
+
   it("does NOT cache failures — next call retries the fetch", async () => {
     clearPolygonEarningsCache();
     const counter = { calls: 0 };

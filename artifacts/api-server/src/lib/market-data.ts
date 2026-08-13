@@ -1447,7 +1447,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     // Delegate to the shared module-level helper (rate-limited via this.limiter
     // indirectly: callers already hold a rate-limiter slot from the enclosing
     // fetchStockData call, so no extra throttling is needed here).
-    return fetchPolygonEarningsData(this.apiKey, ticker);
+    return fetchPolygonEarningsDataCached(this.apiKey, ticker);
   }
 
   private async fetchOptionsStats(ticker: string): Promise<{
