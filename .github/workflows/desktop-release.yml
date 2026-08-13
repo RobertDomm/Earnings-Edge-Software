@@ -263,9 +263,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-latest
-          name: EE Software Screener — Desktop App (v${{ needs.prepare.outputs.version }})
+          name: Earnings Edge Software — Desktop App (v${{ needs.prepare.outputs.version }})
           body: |
-            ## Download the EE Software Screener
+            ## Download Earnings Edge Software
 
             **Version ${{ needs.prepare.outputs.version }}**
 
@@ -284,7 +284,7 @@ jobs:
             Once installed, the app checks for new versions automatically on startup and prompts you to restart when one is ready — no manual reinstall needed.
 
             ### How it works
-            The app loads `https://eesoftware.app/screener`. Sign in with your Circle email — access is verified automatically on every launch. If your membership is removed, you'll be redirected to the sign-in page.
+            The app loads `https://eesoftware.app`. Sign in with your Circle email — access is verified automatically on every launch. If your membership is removed, you'll be redirected to the sign-in page.
           prerelease: false
           make_latest: true
           files: |

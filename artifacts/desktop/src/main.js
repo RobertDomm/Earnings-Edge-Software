@@ -25,7 +25,7 @@ function setupAutoUpdater() {
       .showMessageBox(mainWindow, {
         type: 'info',
         title: 'Update Ready',
-        message: `EE Software Screener ${info.version} is ready to install.`,
+        message: `Earnings Edge Software ${info.version} is ready to install.`,
         detail:
           'The update will be applied the next time the app restarts. ' +
           'Restart now to get the latest version.',
