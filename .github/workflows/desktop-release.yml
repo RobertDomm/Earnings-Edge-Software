@@ -111,11 +111,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
       - name: Install dependencies
-        run: pnpm install
+        working-directory: artifacts/desktop
+        run: npm install
 
       - name: Generate .icns icon from PNG
         working-directory: artifacts/desktop
@@ -133,7 +131,7 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
           VERSION="${{ needs.prepare.outputs.version }}"
-          pnpm exec electron-builder --mac \
+          ./node_modules/.bin/electron-builder --mac \
             --publish never \
             --config.publish.owner="$OWNER" \
             --config.publish.repo="$REPO" \
@@ -163,11 +161,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
       - name: Install dependencies
-        run: pnpm install
+        working-directory: artifacts/desktop
+        run: npm install
 
       - name: Build Windows installer
         working-directory: artifacts/desktop
@@ -176,7 +172,7 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
           VERSION="${{ needs.prepare.outputs.version }}"
-          pnpm exec electron-builder --win \
+          ./node_modules/.bin/electron-builder --win \
             --publish never \
             --config.publish.owner="$OWNER" \
             --config.publish.repo="$REPO" \
@@ -204,11 +200,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
       - name: Install dependencies
-        run: pnpm install
+        working-directory: artifacts/desktop
+        run: npm install
 
       - name: Build Linux AppImage
         working-directory: artifacts/desktop
@@ -216,7 +210,7 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           REPO="${GITHUB_REPOSITORY#*/}"
           VERSION="${{ needs.prepare.outputs.version }}"
-          pnpm exec electron-builder --linux \
+          ./node_modules/.bin/electron-builder --linux \
             --publish never \
             --config.publish.owner="$OWNER" \
             --config.publish.repo="$REPO" \
