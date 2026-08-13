@@ -115,6 +115,9 @@ jobs:
         working-directory: artifacts/desktop
         run: npm install
 
+      - name: Detach any stale DMG volumes
+        run: hdiutil detach "/Volumes/EE Software Screener" 2>/dev/null || true
+
       - name: Generate .icns icon from PNG
         working-directory: artifacts/desktop
         run: |
