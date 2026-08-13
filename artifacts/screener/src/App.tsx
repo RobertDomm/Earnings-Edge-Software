@@ -102,7 +102,7 @@ function SignInPage() {
           path={`${basePath}/sign-in`}
           signUpUrl={`${basePath}/sign-up`}
           fallbackRedirectUrl={`${basePath}/`}
-          appearance={{ elements: { footerAction: { display: 'none' } } }}
+          appearance={{ elements: { footerAction: { display: 'none' }, formFieldLabel: { display: 'none' } } }}
         />
       </div>
     </div>
@@ -159,6 +159,7 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
+      localization={{ signIn: { start: { title: 'Welcome', subtitle: '' } } }}
     >
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
