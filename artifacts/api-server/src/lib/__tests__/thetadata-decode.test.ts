@@ -692,7 +692,7 @@ describe("fetchPolygonEarningsDataCached — per-ticker 24h cache", () => {
     globalThis.fetch = countingStub(counter);
     try {
       const { LiveMarketDataProvider } = await import("../market-data.js");
-      const provider = new LiveMarketDataProvider("stub-key", 0);
+      const provider = new LiveMarketDataProvider("stub-key", 0, 300);
       // Access the private per-ticker earnings helper the refresh cycle uses.
       const fetchEarnings = (provider as unknown as {
         fetchEarningsData(t: string): Promise<{ nextEarningsDate: string | null }>;
