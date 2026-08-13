@@ -20,16 +20,20 @@ type GetUserAuthInfo = (
 /** Shape expected of a getAuth-compatible function. */
 type GetAuth = (req: Request) => { userId: string | null | undefined };
 
+/** Shape expected of a checkEmailMembership-compatible function. */
+type CheckEmailMembership = (email: string) => Promise<boolean>;
+
 /**
- * Factory that builds the auth status router with injectable `getUserAuthInfo`
- * and `getAuth` implementations.  Use this in tests to avoid real Clerk /
- * Circle API calls.
+ * Factory that builds the auth status router with injectable `getUserAuthInfo`,
+ * `getAuth`, and `checkMembership` implementations.  Use this in tests to avoid
+ * real Clerk / Circle API calls.
  *
  * Production code uses the default export below (real Clerk + Circle).
  */
 export function createAuthStatusRouter(
   getUserInfo: GetUserAuthInfo = getUserAuthInfo,
   getAuth: GetAuth = clerkGetAuth,
+  checkMembership: CheckEmailMembership = checkEmailMembership,
 ): IRouter {
   const router: IRouter = Router();
 
@@ -43,7 +47,7 @@ export function createAuthStatusRouter(
       return;
     }
     try {
-      const authorized = await checkEmailMembership(email.trim().toLowerCase());
+      const authorized = await checkMembership(email.trim().toLowerCase());
       res.json({ authorized });
     } catch (err) {
       logger.error({ err }, "Preflight Circle check failed");

@@ -6,6 +6,15 @@
  *
  * Scenarios covered:
  *
+ *   Layer 0 — POST /auth/preflight (routes/auth.ts)
+ *     0a. Non-member email → checkMembership returns false → { authorized: false }, HTTP 200
+ *     0b. Member email → checkMembership returns true → { authorized: true }, HTTP 200
+ *     0c. Missing email body field → HTTP 400
+ *     0d. Non-string email body field → HTTP 400
+ *     0e. Email is trimmed + lowercased before the membership check
+ *     0f. checkMembership throws → HTTP 500 (does not crash the server)
+ *     0g. Non-member response never exposes email in the body
+ *
  *   Layer 1 — getUserAuthInfo (circle-membership.ts)
  *     1.  Non-member email → Circle returns empty array  → authorized: false
  *     2.  Non-member email → Circle returns 404          → authorized: false
@@ -152,6 +161,255 @@ function startServer(app: express.Express): Promise<TestServer> {
 function stopServer(s: Server): Promise<void> {
   return new Promise((res, rej) => s.close((e) => (e ? rej(e) : res())));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Layer 0 — POST /auth/preflight
+//
+// This is the earliest possible gate: the frontend calls /auth/preflight with
+// the user's email BEFORE Clerk ever sends a verification code.  A non-member
+// must receive { authorized: false } immediately; Clerk is never touched.
+//
+// Each test injects a deterministic `checkMembership` stub via the third
+// parameter of createAuthStatusRouter, so no real Circle API calls are made
+// and no globalThis.fetch mutation is needed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("POST /auth/preflight — non-member email is denied before Clerk sends a code", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    // checkMembership stub always returns false (non-member)
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async (_email: string) => false,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 200", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+  });
+
+  it("body has authorized: false", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    const body = (await res.json()) as { authorized: boolean };
+    assert.equal(
+      body.authorized,
+      false,
+      "Non-member must receive authorized: false — Clerk must never send them a code",
+    );
+  });
+
+  it("response body does not expose the submitted email", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    const text = await res.text();
+    assert.ok(
+      !text.includes(NON_MEMBER_EMAIL),
+      "Preflight response must not echo the email back for a non-member",
+    );
+  });
+});
+
+describe("POST /auth/preflight — member email is approved", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    // checkMembership stub always returns true (member)
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: MEMBER_EMAIL, authorized: true }),
+      makeGetAuth(null),
+      async (_email: string) => true,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 200", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: MEMBER_EMAIL }),
+    });
+    assert.equal(res.status, 200, `Expected 200, got ${res.status}`);
+  });
+
+  it("body has authorized: true", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: MEMBER_EMAIL }),
+    });
+    const body = (await res.json()) as { authorized: boolean };
+    assert.equal(
+      body.authorized,
+      true,
+      "Circle member must receive authorized: true so Clerk proceeds to send a code",
+    );
+  });
+});
+
+describe("POST /auth/preflight — missing email field returns 400", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async (_email: string) => false,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 400 when email is absent from the body", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 400, `Expected 400 for missing email, got ${res.status}`);
+  });
+
+  it("error body contains an error field", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = (await res.json()) as { error: string };
+    assert.ok(typeof body.error === "string" && body.error.length > 0,
+      "400 body must contain a non-empty error string");
+  });
+});
+
+describe("POST /auth/preflight — non-string email field returns 400", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async (_email: string) => false,
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 400 when email is not a string (e.g. a number)", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: 12345 }),
+    });
+    assert.equal(res.status, 400, `Expected 400 for non-string email, got ${res.status}`);
+  });
+});
+
+describe("POST /auth/preflight — email is normalised before the membership check", () => {
+  let ts: TestServer;
+  let capturedEmail: string | null;
+
+  before(async () => {
+    capturedEmail = null;
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async (email: string) => {
+        capturedEmail = email;
+        return false;
+      },
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("trims whitespace and lowercases the email before calling checkMembership", async () => {
+    await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "  Member@Example.COM  " }),
+    });
+    assert.equal(
+      capturedEmail,
+      "member@example.com",
+      `checkMembership must receive a trimmed, lowercased email (got: ${capturedEmail})`,
+    );
+  });
+});
+
+describe("POST /auth/preflight — checkMembership throws returns 500 without crashing", () => {
+  let ts: TestServer;
+
+  before(async () => {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createAuthStatusRouter(
+      async () => ({ email: "", authorized: false }),
+      makeGetAuth(null),
+      async (_email: string) => { throw new Error("Circle API unavailable"); },
+    ));
+    ts = await startServer(app);
+  });
+  after(() => stopServer(ts.server));
+
+  it("returns HTTP 500", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    assert.equal(res.status, 500, `Expected 500 when checkMembership throws, got ${res.status}`);
+  });
+
+  it("does not expose the internal error message", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    const text = await res.text();
+    assert.ok(
+      !text.includes("Circle API unavailable"),
+      "Internal error detail must not be exposed in the preflight response",
+    );
+  });
+
+  it("response body contains an error field", async () => {
+    const res = await fetch(`${ts.url}/api/auth/preflight`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: NON_MEMBER_EMAIL }),
+    });
+    const body = (await res.json()) as { error: string };
+    assert.ok(typeof body.error === "string" && body.error.length > 0,
+      "500 body must include a non-empty error string");
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Layer 1 — getUserAuthInfo (circle-membership.ts)
