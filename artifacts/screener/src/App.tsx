@@ -102,6 +102,7 @@ function SignInPage() {
           path={`${basePath}/sign-in`}
           signUpUrl={`${basePath}/sign-up`}
           fallbackRedirectUrl={`${basePath}/`}
+          appearance={{ elements: { footerAction: { display: 'none' } } }}
         />
       </div>
     </div>
