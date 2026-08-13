@@ -45,11 +45,13 @@ jobs:
           # No signing — unsigned builds only.
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload macOS artifact
+      - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mac-dmg
-          path: artifacts/desktop/dist/*.dmg
+          path: |
+            artifacts/desktop/dist/*.dmg
+            artifacts/desktop/dist/latest-mac.yml
 
   build-windows:
     name: Windows (.exe)
@@ -72,11 +74,13 @@ jobs:
         working-directory: artifacts/desktop
         run: pnpm run build:win
 
-      - name: Upload Windows artifact
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe
-          path: artifacts/desktop/dist/*.exe
+          path: |
+            artifacts/desktop/dist/*.exe
+            artifacts/desktop/dist/latest.yml
 
   build-linux:
     name: Linux (.AppImage)
@@ -99,11 +103,13 @@ jobs:
         working-directory: artifacts/desktop
         run: pnpm run build:linux
 
-      - name: Upload Linux artifact
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
-          path: artifacts/desktop/dist/*.AppImage
+          path: |
+            artifacts/desktop/dist/*.AppImage
+            artifacts/desktop/dist/latest-linux.yml
 
   release:
     name: Publish GitHub Release
@@ -136,13 +142,19 @@ jobs:
             **Windows:** Click **"More info"** → **"Run anyway"** in the SmartScreen warning (one-time only).
             **Linux:** Make the AppImage executable (`chmod +x *.AppImage`) then run it.
 
+            ### Auto-updates
+            Once installed, the app checks for new versions automatically on startup and prompts you to restart when one is ready — no manual reinstall needed.
+
             ### How it works
             The app loads `https://eesoftware.app/screener`. Sign in with your Circle email — access is verified automatically on every launch. If your membership is removed, you'll be redirected to the sign-in page.
           prerelease: false
           make_latest: true
           files: |
             dist-all/mac-dmg/*.dmg
+            dist-all/mac-dmg/latest-mac.yml
             dist-all/windows-exe/*.exe
+            dist-all/windows-exe/latest.yml
             dist-all/linux-appimage/*.AppImage
+            dist-all/linux-appimage/latest-linux.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

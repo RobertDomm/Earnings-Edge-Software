@@ -1,12 +1,52 @@
 'use strict';
 
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 const APP_URL = 'https://eesoftware.app/screener';
 
 // Keep a global reference so the window isn't garbage-collected.
 let mainWindow = null;
+
+// ── Auto-updater ─────────────────────────────────────────────────────────────
+
+function setupAutoUpdater() {
+  // Log update events to the console (visible via Electron's --inspect or
+  // by attaching a logger).  Errors are swallowed silently so a failed
+  // update check never interrupts the member's session.
+  autoUpdater.logger = null; // disable the built-in logger noise
+
+  // When an update has been downloaded, prompt the member to restart.
+  autoUpdater.on('update-downloaded', (info) => {
+    if (!mainWindow) return;
+
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Ready',
+        message: `EE Software Screener ${info.version} is ready to install.`,
+        detail:
+          'The update will be applied the next time the app restarts. ' +
+          'Restart now to get the latest version.',
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall();
+      })
+      .catch(() => {});
+  });
+
+  // Swallow errors silently — a failed update check (e.g. no internet,
+  // release not published yet) must never crash or interrupt the session.
+  autoUpdater.on('error', (err) => {
+    console.error('[auto-updater] error:', err.message ?? err);
+  });
+}
+
+// ── Window ───────────────────────────────────────────────────────────────────
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -50,8 +90,17 @@ function getIconFilename() {
   }
 }
 
+// ── App lifecycle ─────────────────────────────────────────────────────────────
+
 app.whenReady().then(() => {
+  setupAutoUpdater();
   createWindow();
+
+  // Check for updates 4 seconds after the window opens so Clerk sign-in
+  // has time to render before any update dialog could appear.
+  setTimeout(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+  }, 4000);
 
   // macOS: re-create the window when the dock icon is clicked and no windows are open.
   app.on('activate', () => {

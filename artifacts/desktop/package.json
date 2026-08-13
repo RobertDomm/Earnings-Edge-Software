@@ -11,6 +11,9 @@
     "build:linux": "electron-builder --linux",
     "build:all": "electron-builder --mac --win --linux"
   },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
   "devDependencies": {
     "electron": "^32.0.0",
     "electron-builder": "^25.0.0"
@@ -54,6 +57,10 @@
         { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
       ]
     },
-    "publish": null
+    "publish": {
+      "provider": "github",
+      "owner": "eesoftware",
+      "repo": "screener"
+    }
   }
 }
