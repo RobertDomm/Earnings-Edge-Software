@@ -4,7 +4,7 @@ const { app, BrowserWindow, shell, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
-const APP_URL = 'https://eesoftware.app/screener/';
+const APP_URL = 'https://eesoftware.app/';
 
 // Keep a global reference so the window isn't garbage-collected.
 let mainWindow = null;
