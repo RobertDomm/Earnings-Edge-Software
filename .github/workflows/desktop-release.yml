@@ -1,0 +1,148 @@
+name: Build Desktop Installers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'artifacts/desktop/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    name: macOS (.dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: artifacts/desktop
+        run: pnpm install
+
+      - name: Generate .icns icon from PNG
+        working-directory: artifacts/desktop
+        run: |
+          mkdir -p /tmp/ee.iconset
+          for SIZE in 16 32 64 128 256 512; do
+            sips -z $SIZE $SIZE build/icon.png --out /tmp/ee.iconset/icon_${SIZE}x${SIZE}.png
+            sips -z $((SIZE*2)) $((SIZE*2)) build/icon.png --out /tmp/ee.iconset/icon_${SIZE}x${SIZE}@2x.png
+          done
+          iconutil -c icns /tmp/ee.iconset -o build/icon.icns
+
+      - name: Build macOS DMG
+        working-directory: artifacts/desktop
+        run: pnpm run build:mac
+        env:
+          # No signing — unsigned builds only.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: artifacts/desktop/dist/*.dmg
+
+  build-windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: artifacts/desktop
+        run: pnpm install
+
+      - name: Build Windows installer
+        working-directory: artifacts/desktop
+        run: pnpm run build:win
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: artifacts/desktop/dist/*.exe
+
+  build-linux:
+    name: Linux (.AppImage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: artifacts/desktop
+        run: pnpm install
+
+      - name: Build Linux AppImage
+        working-directory: artifacts/desktop
+        run: pnpm run build:linux
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: artifacts/desktop/dist/*.AppImage
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-mac, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-all
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          name: EE Software Screener — Desktop App
+          body: |
+            ## Download the EE Software Screener
+
+            | Platform | File |
+            |----------|------|
+            | Mac (Intel + Apple Silicon) | `.dmg` |
+            | Windows | `.exe` installer |
+            | Linux | `.AppImage` |
+
+            ### First-time install instructions
+            **Mac:** Right-click the `.dmg` → Open → click **"Open"** in the security dialog (unsigned app warning, one-time only).
+            **Windows:** Click **"More info"** → **"Run anyway"** in the SmartScreen warning (one-time only).
+            **Linux:** Make the AppImage executable (`chmod +x *.AppImage`) then run it.
+
+            ### How it works
+            The app loads `https://eesoftware.app/screener`. Sign in with your Circle email — access is verified automatically on every launch. If your membership is removed, you'll be redirected to the sign-in page.
+          prerelease: false
+          make_latest: true
+          files: |
+            dist-all/mac-dmg/*.dmg
+            dist-all/windows-exe/*.exe
+            dist-all/linux-appimage/*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
