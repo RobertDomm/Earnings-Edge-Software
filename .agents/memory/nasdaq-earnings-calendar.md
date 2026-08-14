@@ -1,10 +1,13 @@
 ---
-name: Nasdaq earnings calendar
-description: Keyless source of confirmed earnings dates used to overlay Polygon's +91-day estimate
+name: Nasdaq earnings endpoints
+description: Keyless Nasdaq APIs used for confirmed future and historical past earnings dates; UA requirement and roles.
 ---
 
-Confirmed earnings dates come from Nasdaq's public API: `https://api.nasdaq.com/api/calendar/earnings?date=YYYY-MM-DD` — no API key needed, but it **rejects requests without a browser-like User-Agent header**. Response shape: `{data:{rows:[{symbol,...}]}}`; rows may be null on empty days.
+Two keyless Nasdaq endpoints (both require a browser-like User-Agent header or they hang/reject):
 
-**Why:** The screener's 14–18 day entry window is strict; the Polygon "+91 days after last filing" estimate can drift several days, so confirmed dates are overlaid on top and the estimate is only a fallback (`earningsDateSource: "confirmed" | "estimated"` on StockQuote).
+1. `https://api.nasdaq.com/api/calendar/earnings?date=YYYY-MM-DD` — confirmed FUTURE earnings dates, one request per calendar day; overlaid on the Polygon +91-day estimate for Filters 2/5.
+2. `https://api.nasdaq.com/api/company/{symbol}/earnings-surprise` — HISTORICAL reported earnings dates (last ~4 quarters, `dateReported` in `M/D/YYYY`, most recent first). Used as the fallback source of past earnings dates for foreign ADRs (BABA, TSM, JD, ...) whose quarters never appear in Polygon's SEC-filings feed, so Filter 4 gets a real pass/fail instead of a bypass.
 
-**How to apply:** Bulk-fetch weekdays for the lookahead range once (12h cache; total failure negative-cached ~15 min so an outage can't cause a request flood). Filters 2/5 append ", confirmed"/", estimated" to their displayed values. Lookups never throw — unavailable calendar just means fallback to estimate.
+**Why:** Polygon `/vX/reference/financials` returns zero quarterly filings for ADRs; only US SEC filers appear there.
+
+**How to apply:** any feature needing past earnings dates for non-US names should reuse the earnings-surprise lookup (cached 24h per symbol, failures not cached) rather than adding a paid provider.

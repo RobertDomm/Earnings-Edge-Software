@@ -3,5 +3,5 @@
 - [Clerk v6 Future API errors](clerk-future-api-errors.md) — methods resolve to { error }, never throw; API errors carry generic top-level code "api_response_error" — real code is nested in error.errors[].code.
 - [External Clerk on Replit](clerk-external-replit.md) — use clerkMiddleware() with no args; do NOT pass getClerkProxyHost() to it or Clerk loads from clerk.{dev-domain} and crashes.
 - [Clerk prod instance settings](clerk-prod-instance-settings.md) — Clerk dev/prod configs are separate; prod 422 "email_address not valid parameter" means email identifier + email-code strategy not enabled in the Production instance.
-- [Nasdaq earnings calendar](nasdaq-earnings-calendar.md) — keyless confirmed-earnings-dates API; needs browser-like User-Agent; overlaid on Polygon +91-day estimate.
+- [Nasdaq earnings endpoints](nasdaq-earnings-calendar.md) — keyless APIs: calendar for confirmed future dates; per-symbol earnings-surprise for past reported dates (ADR Filter-4 fallback). Browser UA required.
 - [Circle Admin v2 API](circle-api-admin-v2.md) — correct endpoint for space group membership is /api/admin/v2/space_group_member?email=X&space_group_id=Y; token type must be "Admin v2"; NOT /api/v1/.

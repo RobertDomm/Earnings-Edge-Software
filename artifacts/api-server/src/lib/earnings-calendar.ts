@@ -171,6 +171,96 @@ export async function getConfirmedEarningsCalendar(
   return s.dates;
 }
 
+// ---------------------------------------------------------------------------
+// Historical earnings dates — Nasdaq's per-symbol earnings-surprise API.
+//
+// Polygon's SEC-filings feed has no quarterly data for foreign companies
+// trading as ADRs (BABA, TSM, JD, ...), so their 4-quarter volatility history
+// (Filter 4) cannot be built from filings. Nasdaq's
+// https://api.nasdaq.com/api/company/{symbol}/earnings-surprise endpoint
+// returns the actual REPORTED dates of the last ~4 quarters for these names,
+// which callers use as a fallback source of past earnings dates.
+// ---------------------------------------------------------------------------
+
+const NASDAQ_COMPANY_BASE = "https://api.nasdaq.com/api/company";
+
+/** Successful per-symbol history lookups are reused for 24 hours. */
+const HISTORY_TTL_MS = 24 * 60 * 60 * 1000;
+
+interface NasdaqSurpriseRow {
+  dateReported?: string;
+}
+interface NasdaqSurpriseResponse {
+  data?: { earningsSurpriseTable?: { rows?: NasdaqSurpriseRow[] | null } | null } | null;
+}
+
+const historicalDatesCache = new Map<string, { dates: string[]; fetchedAt: number }>();
+
+/** Test hook: drop the cached per-symbol historical earnings dates. */
+export function clearHistoricalEarningsCache(): void {
+  historicalDatesCache.clear();
+}
+
+/** Parses Nasdaq's "M/D/YYYY" dateReported format to YYYY-MM-DD, or null. */
+function parseNasdaqDate(raw: string): string | null {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw.trim());
+  if (!m) return null;
+  return `${m[3]}-${m[1]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}`;
+}
+
+/**
+ * Past reported earnings dates (YYYY-MM-DD, most recent first) for one symbol
+ * from Nasdaq's earnings-surprise API. Future-dated rows are excluded so the
+ * result is safe to use for backward-looking volatility windows.
+ *
+ * Returns null when the endpoint fails or yields no past dates. Never throws.
+ * Successes are cached 24h; failures are not cached, so the next refresh
+ * retries.
+ */
+export async function getHistoricalEarningsDates(
+  symbol: string,
+  opts: EarningsCalendarOptions = {},
+): Promise<string[] | null> {
+  const sym = symbol.toUpperCase().trim();
+  const hit = historicalDatesCache.get(sym);
+  if (hit && Date.now() - hit.fetchedAt < HISTORY_TTL_MS) return hit.dates;
+
+  const fetchImpl: FetchLike = opts.fetchImpl ?? (fetch as unknown as FetchLike);
+  const today = toLocalYmd(opts.today ?? new Date());
+
+  try {
+    const res = await fetchImpl(`${NASDAQ_COMPANY_BASE}/${encodeURIComponent(sym)}/earnings-surprise`, {
+      headers: {
+        // Nasdaq's API rejects requests without a browser-like User-Agent.
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) throw new Error(`Nasdaq earnings-surprise HTTP ${res.status}`);
+    const body = (await res.json()) as NasdaqSurpriseResponse;
+    const rows = body?.data?.earningsSurpriseTable?.rows ?? [];
+
+    const dates = rows
+      .map((r) => (r.dateReported ? parseNasdaqDate(r.dateReported) : null))
+      .filter((d): d is string => d !== null && d < today)
+      .sort((a, b) => (a < b ? 1 : -1));
+
+    if (dates.length === 0) {
+      console.warn(`[EarningsCalendar] ${sym}: Nasdaq earnings-surprise returned no past reported dates.`);
+      return null;
+    }
+
+    historicalDatesCache.set(sym, { dates, fetchedAt: Date.now() });
+    return dates;
+  } catch (err) {
+    console.warn(
+      `[EarningsCalendar] ${sym}: historical earnings dates unavailable — ${err instanceof Error ? err.message : String(err)}.`,
+    );
+    return null;
+  }
+}
+
 /**
  * Confirmed earnings date for one symbol, or null when the calendar has no
  * entry (or is unavailable). Never throws.

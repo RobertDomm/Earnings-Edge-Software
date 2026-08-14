@@ -654,6 +654,101 @@ describe("fetchPolygonEarningsData — stub Polygon HTTP (both API keys active)"
 });
 
 // ---------------------------------------------------------------------------
+// fetchPolygonEarningsData — Nasdaq historical-dates fallback (foreign ADRs)
+// ---------------------------------------------------------------------------
+
+describe("fetchPolygonEarningsData — ADR fallback via historical earnings dates", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  /** Past reported earnings dates for the stub ADR — most recent first. */
+  const ADR_DATES = ["2026-05-13", "2026-03-19", "2025-11-25", "2025-08-29"];
+  const ADR_BARS = makeStubBars(ADR_DATES);
+
+  /** Polygon stub: financials has NO quarterly data (the ADR case), aggregates work. */
+  function installAdrStub(): void {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) {
+        return makeJsonResponse({ results: [], status: "OK" });
+      }
+      if (url.includes("/v2/aggs/ticker/")) {
+        return makeJsonResponse({ results: ADR_BARS, status: "OK" });
+      }
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    }) as typeof globalThis.fetch;
+  }
+
+  it("builds a 4-record IV history from injected historical earnings dates when Polygon has no filings", async () => {
+    installAdrStub();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "BABA", {
+        retryBaseMs: 1,
+        historicalEarningsDatesFetcher: async () => ADR_DATES,
+      });
+      assert.ok(
+        result.earningsIvHistory !== null,
+        "earningsIvHistory must be non-null when the historical-dates fallback supplies 4 past dates",
+      );
+      assert.equal(result.earningsIvHistory!.length, 4);
+      assert.deepEqual(
+        result.earningsIvHistory!.map((r) => r.earningsDate),
+        ADR_DATES,
+        "records must be built from the fallback dates",
+      );
+      for (const rec of result.earningsIvHistory!) {
+        assert.equal(typeof rec.ivRose, "boolean");
+        assert.ok(rec.ivBeforeEarnings > 0 && rec.ivBaseline > 0);
+      }
+      // With no filings, the +91-day estimate is derived from the latest reported date.
+      assert.equal(result.nextEarningsDate, "2026-08-12", "nextEarningsDate must be latest reported date + 91 days");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns null IV history when the fallback supplies fewer than 4 past dates", async () => {
+    installAdrStub();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "NIO", {
+        retryBaseMs: 1,
+        historicalEarningsDatesFetcher: async () => ADR_DATES.slice(0, 3),
+      });
+      assert.equal(result.earningsIvHistory, null);
+      assert.equal(result.nextEarningsDate, null);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not consult the fallback when Polygon already has 4 filings (US path unchanged)", async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes("/vX/reference/financials")) return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      if (url.includes("/v2/aggs/ticker/")) return makeJsonResponse({ results: STUB_BARS, status: "OK" });
+      return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
+    }) as typeof globalThis.fetch;
+    let fallbackCalls = 0;
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META", {
+        retryBaseMs: 1,
+        historicalEarningsDatesFetcher: async () => { fallbackCalls++; return ADR_DATES; },
+      });
+      assert.equal(fallbackCalls, 0, "fallback must not run when Polygon supplies 4 filings");
+      assert.equal(result.earningsIvHistory!.length, 4);
+      assert.deepEqual(
+        result.earningsIvHistory!.map((r) => r.earningsDate),
+        STUB_FILINGS.map((f) => f.filing_date),
+        "records must come from Polygon filings, not the fallback",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fetchPolygonEarningsData — retry, error logging, and per-ticker caching
 // ---------------------------------------------------------------------------
 
@@ -735,10 +830,15 @@ describe("fetchPolygonEarningsData — retry and error logging", () => {
       return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
     });
     try {
-      const result = await fetchPolygonEarningsData("stub-key", "TSLA", FAST);
+      const result = await fetchPolygonEarningsData("stub-key", "TSLA", {
+        ...FAST,
+        historicalEarningsDatesFetcher: async () => null,
+      });
       assert.equal(result.nextEarningsDate, null);
-      assert.equal(warnings.length, 1);
-      assert.match(warnings[0]!, /no quarterly filings/, "warning must state that no filings were returned");
+      assert.ok(
+        warnings.some((w) => /no quarterly filings/.test(w)),
+        `a warning must state that no filings were returned (got: ${warnings.join(" | ")})`,
+      );
     } finally {
       teardown();
     }

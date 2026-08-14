@@ -19,7 +19,7 @@
  * scan can serve data from cache rather than blocking an HTTP request.
  */
 
-import { getConfirmedEarningsDate } from "./earnings-calendar.js";
+import { getConfirmedEarningsDate, getHistoricalEarningsDates } from "./earnings-calendar.js";
 
 /** A structured upcoming corporate event that could rival earnings as a catalyst. */
 export interface UpcomingCorporateEvent {
@@ -990,6 +990,13 @@ export interface PolygonEarningsFetchOptions {
   retries?: number;
   /** Base backoff in ms; attempt n waits retryBaseMs × 2ⁿ. Default 250. Tests pass 1. */
   retryBaseMs?: number;
+  /**
+   * Injectable source of past reported earnings dates (YYYY-MM-DD, most recent
+   * first) used as a fallback when Polygon has fewer than 4 quarterly filings
+   * (foreign ADRs like BABA/TSM). Defaults to Nasdaq's earnings-surprise API.
+   * Tests inject a stub.
+   */
+  historicalEarningsDatesFetcher?: (ticker: string) => Promise<string[] | null>;
 }
 
 /**
@@ -1074,61 +1081,95 @@ export async function fetchPolygonEarningsData(
     nextEarningsDate = next.toISOString().split("T")[0]!;
   }
 
-  if (filings.length < 4) {
-    return { nextEarningsDate, earningsIvHistory: null };
-  }
+  // --- Step 2: price aggregates for IV history over a set of earnings dates
+  // (dates must be YYYY-MM-DD, most recent first). Returns null on failure or
+  // when fewer than 4 usable cycles result. ---
+  async function computeIvHistory(earningsDates: string[]): Promise<EarningsIvRecord[] | null> {
+    try {
+      const earliest = earningsDates[earningsDates.length - 1]!;
+      const priceFrom = dateOffsetFrom(earliest, -50);
+      const priceTo   = dateOffsetFrom(earningsDates[0]!, -1);
 
-  // --- Step 2: price aggregates for IV history ---
-  try {
-    const earliest = filings[filings.length - 1]!;
-    const priceFrom = dateOffsetFrom(earliest, -50);
-    const priceTo   = dateOffsetFrom(filings[0]!, -1);
+      const aggs = await polyFetch<PolygonAggregatesResponse>(
+        `/v2/aggs/ticker/${ticker}/range/1/day/${priceFrom}/${priceTo}`,
+        { adjusted: "true", sort: "asc", limit: "250" },
+      );
 
-    const aggs = await polyFetch<PolygonAggregatesResponse>(
-      `/v2/aggs/ticker/${ticker}/range/1/day/${priceFrom}/${priceTo}`,
-      { adjusted: "true", sort: "asc", limit: "250" },
-    );
+      const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
+      const records: EarningsIvRecord[] = [];
 
-    const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
-    const records: EarningsIvRecord[] = [];
+      for (const earningsDate of earningsDates) {
+        const earningsTs = new Date(earningsDate + "T00:00:00").getTime();
+        const preCloses: number[]  = [];
+        const baseCloses: number[] = [];
 
-    for (const earningsDate of filings) {
-      const earningsTs = new Date(earningsDate + "T00:00:00").getTime();
-      const preCloses: number[]  = [];
-      const baseCloses: number[] = [];
+        for (const bar of bars) {
+          const barDate = new Date(bar.t!).toISOString().split("T")[0]!;
+          const daysTo = Math.round(
+            (earningsTs - new Date(barDate + "T00:00:00").getTime()) / 86_400_000,
+          );
+          if (daysTo >= 2  && daysTo <= 7)  preCloses.push(bar.c!);
+          if (daysTo >= 15 && daysTo <= 40) baseCloses.push(bar.c!);
+        }
 
-      for (const bar of bars) {
-        const barDate = new Date(bar.t!).toISOString().split("T")[0]!;
-        const daysTo = Math.round(
-          (earningsTs - new Date(barDate + "T00:00:00").getTime()) / 86_400_000,
-        );
-        if (daysTo >= 2  && daysTo <= 7)  preCloses.push(bar.c!);
-        if (daysTo >= 15 && daysTo <= 40) baseCloses.push(bar.c!);
+        const ivBefore   = realizedVol(preCloses);
+        const ivBaseline = realizedVol(baseCloses);
+        if (ivBefore === 0 || ivBaseline === 0) continue;
+
+        records.push({
+          earningsDate,
+          ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
+          ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
+          ivRose:           ivBefore > ivBaseline,
+        });
       }
 
-      const ivBefore   = realizedVol(preCloses);
-      const ivBaseline = realizedVol(baseCloses);
-      if (ivBefore === 0 || ivBaseline === 0) continue;
-
-      records.push({
-        earningsDate,
-        ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
-        ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
-        ivRose:           ivBefore > ivBaseline,
-      });
+      return records.length >= 4 ? records : null;
+    } catch (err) {
+      console.warn(
+        `[PolygonEarnings] ${ticker}: price-aggregates fetch failed after retries — ${classifyPolygonError(err)}. ` +
+        `IV history unavailable; earnings date (${nextEarningsDate ?? "null"}) kept.`,
+      );
+      return null;
     }
+  }
 
-    return {
-      nextEarningsDate,
-      earningsIvHistory: records.length >= 4 ? records : null,
-    };
-  } catch (err) {
-    console.warn(
-      `[PolygonEarnings] ${ticker}: price-aggregates fetch failed after retries — ${classifyPolygonError(err)}. ` +
-      `IV history unavailable; earnings date (${nextEarningsDate ?? "null"}) kept.`,
-    );
+  if (filings.length >= 4) {
+    return { nextEarningsDate, earningsIvHistory: await computeIvHistory(filings) };
+  }
+
+  // --- Fallback: Polygon has <4 quarterly filings (typical for foreign ADRs
+  // like BABA/TSM, which never appear in the SEC-filings feed). Pull actual
+  // past reported earnings dates from Nasdaq and build the volatility history
+  // from those instead, so Filter 4 gets a real pass/fail. US names with full
+  // filings never reach this path. ---
+  const historyFetcher =
+    opts.historicalEarningsDatesFetcher ??
+    ((t: string) => getHistoricalEarningsDates(t));
+  const pastDates = await historyFetcher(ticker);
+
+  if (!pastDates || pastDates.length < 4) {
+    if (filings.length === 0) {
+      console.warn(
+        `[PolygonEarnings] ${ticker}: no Polygon filings and ${pastDates ? `only ${pastDates.length}` : "no"} ` +
+        `Nasdaq-reported earnings dates — IV history unavailable; Filter 4 will bypass.`,
+      );
+    }
     return { nextEarningsDate, earningsIvHistory: null };
   }
+
+  const fallbackDates = pastDates.slice(0, 4);
+
+  // With no filings at all, Polygon could not estimate the next earnings date
+  // either — derive the same +91-day estimate from the most recent reported
+  // date so the ticker is fully evaluated (and cacheable) like a US name.
+  if (nextEarningsDate === null) {
+    const next = new Date(fallbackDates[0]! + "T00:00:00");
+    next.setDate(next.getDate() + 91);
+    nextEarningsDate = next.toISOString().split("T")[0]!;
+  }
+
+  return { nextEarningsDate, earningsIvHistory: await computeIvHistory(fallbackDates) };
 }
 
 // ---------------------------------------------------------------------------
