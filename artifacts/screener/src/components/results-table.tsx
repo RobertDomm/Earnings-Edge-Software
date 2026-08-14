@@ -80,8 +80,14 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
         const matchesSearch =
           s.symbol.toLowerCase().includes(search.toLowerCase()) ||
           s.company.toLowerCase().includes(search.toLowerCase());
+        // Partial Pass requires BOTH Filter 1 (Sector Exclusion) AND
+        // Filter 2 (Earnings in 2 Weeks) to have passed — a stock outside
+        // the earnings entry window never shows up here, regardless of how
+        // many other filters it passes.
         const isPartialPass =
-          s.status !== "qualified" && (s.filterResults?.[0]?.passed ?? false);
+          s.status !== "qualified" &&
+          (s.filterResults?.[0]?.passed ?? false) &&
+          (s.filterResults?.[1]?.passed ?? false);
         const matchesStatus =
           statusFilter === "all" ||
           (statusFilter === "pass" && s.status === "qualified") ||
