@@ -644,10 +644,6 @@ export const LIVE_STOCK_UNIVERSE: string[] = [
   // High-vol / momentum names
   "COIN", "MSTR", "PLTR", "RBLX", "SNAP", "UBER", "LYFT", "HOOD",
   "RIVN", "LCID", "NIO", "XPEV", "BIDU", "BABA", "JD",
-  // ETFs (highly optionable)
-  "SPY", "QQQ", "IWM", "ARKK", "GLD", "SLV", "TLT", "HYG",
-  // Volatility / macro
-  "VIXY", "SQQQ", "TQQQ", "SPXS", "SPXL",
 ];
 
 /**
@@ -711,19 +707,6 @@ const TICKER_NAMES: Record<string, string> = {
   BIDU: "Baidu, Inc.",
   BABA: "Alibaba Group Holding Limited",
   JD: "JD.com, Inc.",
-  SPY: "SPDR S&P 500 ETF Trust",
-  QQQ: "Invesco QQQ Trust",
-  IWM: "iShares Russell 2000 ETF",
-  ARKK: "ARK Innovation ETF",
-  GLD: "SPDR Gold Shares",
-  SLV: "iShares Silver Trust",
-  TLT: "iShares 20+ Year Treasury Bond ETF",
-  HYG: "iShares iBoxx $ High Yield Corporate Bond ETF",
-  VIXY: "ProShares VIX Short-Term Futures ETF",
-  SQQQ: "ProShares UltraPro Short QQQ",
-  TQQQ: "ProShares UltraPro QQQ",
-  SPXS: "Direxion Daily S&P 500 Bear 3X Shares",
-  SPXL: "Direxion Daily S&P 500 Bull 3X Shares",
 };
 
 /**
@@ -760,9 +743,6 @@ const TICKER_SECTORS: Record<string, string> = {
   // China tech
   BIDU: "tech", BABA: "tech", JD: "tech",
   // ETFs
-  SPY: "etf", QQQ: "etf", IWM: "etf", ARKK: "etf", GLD: "etf",
-  SLV: "etf", TLT: "etf", HYG: "etf", VIXY: "etf", SQQQ: "etf",
-  TQQQ: "etf", SPXS: "etf", SPXL: "etf",
 };
 
 // ---------------------------------------------------------------------------
