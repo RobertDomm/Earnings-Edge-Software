@@ -15,6 +15,96 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
+// Universe cache retention — an empty/shrunken post-close refresh must never
+// wipe a previously good universe (the "no stocks after hours" bug).
+// ---------------------------------------------------------------------------
+
+function fakeQuote(symbol: string): StockQuote {
+  return {
+    symbol,
+    company: symbol,
+    price: 100,
+    dailyChangePercent: 0,
+    volume: 1_000_000,
+    avgVolume: 1_000_000,
+    marketCap: 1e10,
+    impliedVolatility: 30,
+    optionsVolume: 1000,
+    openInterest: 1000,
+    sector: "other",
+    nextEarningsDate: null,
+    liquidityMetrics: null,
+    earningsIvHistory: null,
+    upcomingEvents: [],
+  } as unknown as StockQuote;
+}
+
+type ProviderInternals = {
+  universeCache: { data: StockQuote[]; fetchedAt: number } | null;
+  universeRefreshFailed: boolean;
+  fetchUniverseFromThetaData(): Promise<StockQuote[]>;
+  refreshUniverseCache(): Promise<void>;
+};
+
+function providerWithCache(cached: StockQuote[]): { provider: ThetaDataProvider; p: ProviderInternals } {
+  const provider = new ThetaDataProvider("stub-theta-key", 300, null, 0);
+  const p = provider as unknown as ProviderInternals;
+  p.universeCache = { data: cached, fetchedAt: Date.now() };
+  p.universeRefreshFailed = false;
+  return { provider, p };
+}
+
+describe("ThetaDataProvider universe cache retention after hours", () => {
+  it("an empty refresh keeps the previous universe and reports source=cached", async () => {
+    const cached = ["AAPL", "MSFT", "NVDA", "AMD"].map(fakeQuote);
+    const { provider, p } = providerWithCache(cached);
+    p.fetchUniverseFromThetaData = async () => [];
+
+    await p.refreshUniverseCache();
+    assert.equal(p.universeCache?.data.length, 4, "empty refresh must not wipe the cache");
+
+    const result = await provider.getStockUniverse();
+    assert.equal(result.stocks.length, 4);
+    assert.equal(result.dataFreshness.source, "cached", "retained data must be labelled cached, not live");
+  });
+
+  it("a drastically shrunken refresh (<50% of prior) also keeps the previous universe", async () => {
+    const cached = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"].map(fakeQuote);
+    const { p } = providerWithCache(cached);
+    p.fetchUniverseFromThetaData = async () => [fakeQuote("A")]; // 10 → 1
+
+    await p.refreshUniverseCache();
+    assert.equal(p.universeCache?.data.length, 10, "shrunken refresh must not replace the cache");
+    assert.equal(p.universeRefreshFailed, true);
+  });
+
+  it("a healthy refresh replaces the cache and reports source=live again", async () => {
+    const cached = ["AAPL", "MSFT", "NVDA", "AMD"].map(fakeQuote);
+    const { provider, p } = providerWithCache(cached);
+    p.universeRefreshFailed = true; // recovering from an after-hours stretch
+    const fresh = ["AAPL", "MSFT", "NVDA"].map(fakeQuote); // 3 of 4 ≥ 50%
+    p.fetchUniverseFromThetaData = async () => fresh;
+
+    await p.refreshUniverseCache();
+    assert.equal(p.universeCache?.data, fresh, "healthy refresh must replace the cache");
+    assert.equal(p.universeRefreshFailed, false);
+
+    const result = await provider.getStockUniverse();
+    assert.equal(result.dataFreshness.source, "live");
+  });
+
+  it("cold start with an empty first fetch still caches it (no prior data to protect)", async () => {
+    const provider = new ThetaDataProvider("stub-theta-key", 300, null, 0);
+    const p = provider as unknown as ProviderInternals;
+    p.universeCache = null;
+    p.fetchUniverseFromThetaData = async () => [];
+    await p.refreshUniverseCache();
+    const after = (provider as unknown as ProviderInternals).universeCache;
+    assert.deepEqual(after?.data, [], "no prior universe — nothing to retain");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Unit tests for tdNormalizeRight (exported for testing)
 // ---------------------------------------------------------------------------
 

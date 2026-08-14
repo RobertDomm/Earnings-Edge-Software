@@ -3004,6 +3004,21 @@ export class ThetaDataProvider implements IMarketDataProvider {
 
     this.universeRefreshing = this.fetchUniverseFromThetaData()
       .then((data) => {
+        // Guard: after the market closes, ThetaData's option snapshots return
+        // no rows, so every ticker is dropped and the refresh "succeeds" with
+        // an empty (or drastically shrunken) list. Never let that wipe out a
+        // previously good universe — keep serving the last market session's
+        // data and mark freshness as cached.
+        const prior = this.universeCache;
+        if (prior && prior.data.length > 0 && data.length < prior.data.length * 0.5) {
+          console.warn(
+            `[ThetaDataProvider] Universe refresh returned ${data.length} stocks ` +
+            `(previously ${prior.data.length}) — likely no post-close snapshot data. ` +
+            `Keeping cached universe from ${new Date(prior.fetchedAt).toISOString()}.`,
+          );
+          this.universeRefreshFailed = true; // → dataFreshness.source = "cached"
+          return;
+        }
         this.universeCache        = { data, fetchedAt: Date.now() };
         this.universeRefreshFailed = false;
       })
