@@ -49,7 +49,7 @@ const FILTER_SHORT_LABELS = ["F1", "F2", "F3", "F4", "F5", "F6"];
 
 export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTableProps) {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pass" | "partial">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pass" | "partial">("pass");
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
