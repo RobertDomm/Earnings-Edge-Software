@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-base-3.13"]
+modules = ["nodejs-24", "python-base-3.13", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -27,3 +27,6 @@ CIRCLE_AUTH_MODE = "clerk"
 
 [userenv.production]
 VITE_CLERK_PROXY_URL = "https://eesoftware.app/api/__clerk"
+
+[nix]
+channel = "stable-25_05"
