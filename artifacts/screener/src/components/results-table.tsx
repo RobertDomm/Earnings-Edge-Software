@@ -15,7 +15,33 @@ interface ResultsTableProps {
   flashThreshold?: number;
 }
 
-type SortKey = "symbol" | "company" | "price" | "dailyChangePercent" | "filterScore" | "status";
+type SortKey = "symbol" | "company" | "price" | "dailyChangePercent" | "nextEarningsDate" | "filterScore" | "status";
+
+/** Badge showing whether an earnings date is confirmed or estimated. */
+export function EarningsSourceBadge({
+  source,
+}: {
+  source: "confirmed" | "estimated" | null | undefined;
+}) {
+  if (!source) return null;
+  const confirmed = source === "confirmed";
+  return (
+    <span
+      title={
+        confirmed
+          ? "Confirmed — date announced on the earnings calendar"
+          : "Estimated — projected from the last quarterly filing (+91 days). Double-check before entry."
+      }
+      className={`inline-flex items-center font-mono text-[9px] uppercase tracking-wider px-1 py-0 border leading-tight ${
+        confirmed
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500"
+          : "border-amber-400/40 bg-amber-400/10 text-amber-400"
+      }`}
+    >
+      {confirmed ? "Confirmed" : "Est."}
+    </span>
+  );
+}
 type SortOrder = "asc" | "desc" | null;
 
 // Short labels shown in the column header (tooltip shows full filter name).
@@ -107,8 +133,8 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
   );
 
   const numFilters = filterNames.length;
-  // colSpan: Symbol + Company + Price + Change + filters + Score + Status
-  const totalCols = 4 + numFilters + 2;
+  // colSpan: Symbol + Company + Price + Change + Earnings + filters + Score + Status
+  const totalCols = 5 + numFilters + 2;
 
   return (
     <div className="flex flex-col gap-4 w-full h-full">
@@ -148,6 +174,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                 {renderSortableHeader("Company", "company")}
                 {renderSortableHeader("Price", "price")}
                 {renderSortableHeader("Daily Change", "dailyChangePercent")}
+                {renderSortableHeader("Earnings", "nextEarningsDate")}
                 {Array.from({ length: numFilters }, (_, i) => renderFilterHeader(i))}
                 {renderSortableHeader("Score", "filterScore")}
                 {renderSortableHeader("Status", "status")}
@@ -226,6 +253,18 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                         }`}
                       >
                         {formatPercent(stock.dailyChangePercent)}
+                      </TableCell>
+
+                      {/* Earnings date + confirmed/estimated badge */}
+                      <TableCell className="font-mono whitespace-nowrap px-3 py-2.5">
+                        {stock.nextEarningsDate ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            {stock.nextEarningsDate}
+                            <EarningsSourceBadge source={stock.earningsDateSource} />
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
 
                       {/* Filter pass/fail/bypass columns */}

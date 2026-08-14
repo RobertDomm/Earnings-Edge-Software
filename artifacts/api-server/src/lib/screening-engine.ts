@@ -49,6 +49,13 @@ export interface ScreeningResult {
   impliedVolatility: number;
   optionsVolume: number;
   openInterest: number;
+  /** Next earnings announcement date (YYYY-MM-DD), or null if unknown. */
+  nextEarningsDate: string | null;
+  /**
+   * How nextEarningsDate was obtained: "confirmed" (real earnings calendar),
+   * "estimated" (last filing + 91 days), or null when unknown/no date.
+   */
+  earningsDateSource: "confirmed" | "estimated" | null;
   filterResults: FilterResult[];
   /**
    * 0–100 percentage of filters that either genuinely passed or were bypassed.
@@ -624,6 +631,10 @@ export class ScreeningEngine {
       impliedVolatility: stock.impliedVolatility,
       optionsVolume: stock.optionsVolume,
       openInterest: stock.openInterest,
+      nextEarningsDate: stock.nextEarningsDate,
+      earningsDateSource: stock.nextEarningsDate
+        ? stock.earningsDateSource ?? null
+        : null,
       filterResults,
       filterScore,
       qualified,

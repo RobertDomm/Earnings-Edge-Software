@@ -6,6 +6,7 @@ import { formatCurrency, formatPercent, formatCompactNumber } from "@/lib/format
 import { Badge } from "./ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { ScrollArea } from "@radix-ui/react-scroll-area";
+import { EarningsSourceBadge } from "./results-table";
 
 // ── Filter 6 helper ──────────────────────────────────────────────────────────
 
@@ -107,6 +108,22 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                 <Metric label="Avg Vol" value={formatCompactNumber(detail.stock.avgVolume)} />
                 <Metric label="Mkt Cap" value={formatCompactNumber(detail.stock.marketCap)} />
                 <Metric label="IV" value={`${(detail.stock.impliedVolatility * 100).toFixed(1)}%`} />
+              </div>
+
+              <div className="mt-4">
+                <Metric
+                  label="Next Earnings"
+                  value={
+                    detail.stock.nextEarningsDate ? (
+                      <span className="inline-flex items-center gap-2">
+                        {detail.stock.nextEarningsDate}
+                        <EarningsSourceBadge source={detail.stock.earningsDateSource} />
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Unknown</span>
+                    )
+                  }
+                />
               </div>
             </div>
 

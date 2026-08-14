@@ -34,6 +34,8 @@ function makeStock(price: number, symbol = "AAPL"): StockResult {
     impliedVolatility: 0.25,
     optionsVolume: 50_000,
     openInterest: 100_000,
+    nextEarningsDate: "2026-08-26",
+    earningsDateSource: "confirmed",
     filterScore: 0.85,
     status: "qualified",
     qualified: true,

@@ -351,7 +351,7 @@ components:
 
     StockResult:
       type: object
-      required: [symbol, company, price, dailyChangePercent, volume, avgVolume, marketCap, impliedVolatility, optionsVolume, openInterest, filterScore, status, filterResults, qualified, qualifiedWithCaveats]
+      required: [symbol, company, price, dailyChangePercent, volume, avgVolume, marketCap, impliedVolatility, optionsVolume, openInterest, nextEarningsDate, earningsDateSource, filterScore, status, filterResults, qualified, qualifiedWithCaveats]
       properties:
         symbol:
           type: string
@@ -373,6 +373,19 @@ components:
           type: number
         openInterest:
           type: number
+        nextEarningsDate:
+          type: string
+          nullable: true
+          description: Next earnings announcement date (YYYY-MM-DD), or null if unknown.
+        earningsDateSource:
+          type: string
+          nullable: true
+          enum: [confirmed, estimated]
+          description: >
+            How nextEarningsDate was obtained: "confirmed" — from a real
+            earnings calendar (announced date); "estimated" — derived from the
+            last quarterly filing date + 91 days; null — no earnings date
+            available.
         filterScore:
           type: number
           description: >

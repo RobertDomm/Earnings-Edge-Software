@@ -95,6 +95,17 @@ export interface FilterResult {
 }
 
 /**
+ * How nextEarningsDate was obtained: "confirmed" — from a real earnings calendar (announced date); "estimated" — derived from the last quarterly filing date + 91 days; null — no earnings date available.
+ */
+export type StockResultEarningsDateSource = typeof StockResultEarningsDateSource[keyof typeof StockResultEarningsDateSource] | null;
+
+
+export const StockResultEarningsDateSource = {
+  confirmed: 'confirmed',
+  estimated: 'estimated',
+} as const;
+
+/**
  * "qualified" — all 6 filters passed with real data. "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry. "not_qualified" — at least one filter genuinely failed.
  */
 export type StockResultStatus = typeof StockResultStatus[keyof typeof StockResultStatus];
@@ -117,6 +128,10 @@ export interface StockResult {
   impliedVolatility: number;
   optionsVolume: number;
   openInterest: number;
+  /** Next earnings announcement date (YYYY-MM-DD), or null if unknown. */
+  nextEarningsDate: string | null;
+  /** How nextEarningsDate was obtained: "confirmed" — from a real earnings calendar (announced date); "estimated" — derived from the last quarterly filing date + 91 days; null — no earnings date available. */
+  earningsDateSource: StockResultEarningsDateSource;
   /** 0–100 percentage of filters that either genuinely passed or were bypassed. Only genuine failures reduce this score. */
   filterScore: number;
   /** "qualified" — all 6 filters passed with real data. "qualified_with_caveats" — no filter failed; some were bypassed due to missing provider data; requires manual review before entry. "not_qualified" — at least one filter genuinely failed. */

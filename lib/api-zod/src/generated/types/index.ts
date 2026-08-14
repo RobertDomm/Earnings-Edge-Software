@@ -29,4 +29,5 @@ export * from './scannerStateStatus';
 export * from './scanResult';
 export * from './stockDetail';
 export * from './stockResult';
+export * from './stockResultEarningsDateSource';
 export * from './stockResultStatus';
