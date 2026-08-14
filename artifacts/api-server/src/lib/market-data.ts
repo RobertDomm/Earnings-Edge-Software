@@ -20,6 +20,7 @@
  */
 
 import { getConfirmedEarningsDate, getHistoricalEarningsDates } from "./earnings-calendar.js";
+import { fetchTmxEarningsEventsCached, type TmxEarningsEvents } from "./tmx-events.js";
 
 /** A structured upcoming corporate event that could rival earnings as a catalyst. */
 export interface UpcomingCorporateEvent {
@@ -1346,11 +1347,29 @@ export interface ResolvedEarningsDate {
 export async function resolveEarningsDate(
   symbol: string,
   estimatedDate: string | null,
+  tmxConfirmedDate: string | null = null,
 ): Promise<ResolvedEarningsDate> {
+  // Source priority: TMX (exchange-sourced, global coverage incl. ADRs) →
+  // Nasdaq calendar → filing-based +91-day estimate → null.
+  if (tmxConfirmedDate) return { nextEarningsDate: tmxConfirmedDate, earningsDateSource: "confirmed" };
   const confirmed = await getConfirmedEarningsDate(symbol);
   if (confirmed) return { nextEarningsDate: confirmed, earningsDateSource: "confirmed" };
   if (estimatedDate) return { nextEarningsDate: estimatedDate, earningsDateSource: "estimated" };
   return { nextEarningsDate: null, earningsDateSource: null };
+}
+
+/**
+ * Builds the Filter-4 historical-dates fetcher for one ticker given its TMX
+ * events: TMX past earnings dates when we have enough to anchor 4 quarters,
+ * otherwise the Nasdaq earnings-surprise fallback.
+ */
+export function tmxAwareHistoryFetcher(
+  tmx: TmxEarningsEvents | null,
+): (ticker: string) => Promise<string[] | null> {
+  return async (ticker: string) => {
+    if (tmx && tmx.historicalEarningsDates.length >= 4) return tmx.historicalEarningsDates;
+    return getHistoricalEarningsDates(ticker);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1651,14 +1670,27 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
    * price data exist.  Returns null for nextEarningsDate only when the
    * financials call itself fails.
    */
-  private async fetchEarningsData(ticker: string): Promise<{
+  private async fetchEarningsData(ticker: string, tmx: TmxEarningsEvents | null = null): Promise<{
     nextEarningsDate: string | null;
     earningsIvHistory: EarningsIvRecord[] | null;
   }> {
     // Delegate to the shared module-level helper (rate-limited via this.limiter
     // indirectly: callers already hold a rate-limiter slot from the enclosing
     // fetchStockData call, so no extra throttling is needed here).
-    return fetchPolygonEarningsDataCached(this.apiKey, ticker);
+    return fetchPolygonEarningsDataCached(this.apiKey, ticker, {
+      historicalEarningsDatesFetcher: tmxAwareHistoryFetcher(tmx),
+    });
+  }
+
+  /**
+   * TMX Corporate Events earnings dates (confirmed upcoming + historical),
+   * routed through this provider's rate limiter. Null when the add-on is
+   * unavailable or the lookup fails — callers fall back to Nasdaq/estimates.
+   */
+  private async fetchTmxEvents(ticker: string): Promise<TmxEarningsEvents | null> {
+    return fetchTmxEarningsEventsCached(this.apiKey, ticker, {
+      acquireSlot: this.limiter ? () => this.limiter!.acquire() : undefined,
+    });
   }
 
   /**
@@ -1925,15 +1957,16 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
             safeNum(snap.day?.c) ||
             safeNum(snap.prevDay?.c);
 
+          const tmx = await this.fetchTmxEvents(snap.ticker);
           const [optStats, avgVol, earningsData, upcomingEvents] = await Promise.all([
             this.fetchOptionsStats(snap.ticker),
             this.fetchAvgVolume(snap.ticker),
-            this.fetchEarningsData(snap.ticker),
+            this.fetchEarningsData(snap.ticker, tmx),
             this.fetchUpcomingEvents(snap.ticker),
           ]);
           const { earningsIvHistory } = earningsData;
           const { nextEarningsDate, earningsDateSource } =
-            await resolveEarningsDate(snap.ticker, earningsData.nextEarningsDate);
+            await resolveEarningsDate(snap.ticker, earningsData.nextEarningsDate, tmx?.nextEarningsDate ?? null);
 
           enriched.push({
             symbol: snap.ticker,
@@ -1969,6 +2002,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
 
   async getStockQuote(symbol: string): Promise<StockQuote | null> {
     try {
+      const tmx = await this.fetchTmxEvents(symbol);
       const [snapData, optStats, avgVol, earningsData, upcomingEvents] = await Promise.all([
         this.polygonFetch<{ ticker?: PolygonTickerSnapshot }>(
           `/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
@@ -1980,7 +2014,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
       ]);
       const { earningsIvHistory } = earningsData;
       const { nextEarningsDate, earningsDateSource } =
-        await resolveEarningsDate(symbol, earningsData.nextEarningsDate);
+        await resolveEarningsDate(symbol, earningsData.nextEarningsDate, tmx?.nextEarningsDate ?? null);
 
       const snap = snapData.ticker;
       if (!snap) return null;
