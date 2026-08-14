@@ -998,6 +998,13 @@ export interface PolygonEarningsFetchOptions {
    * Tests inject a stub.
    */
   historicalEarningsDatesFetcher?: (ticker: string) => Promise<string[] | null>;
+  /**
+   * Exchange-confirmed past earnings dates (YYYY-MM-DD, most recent first),
+   * e.g. from TMX Corporate Events. When 4+ dates are supplied they are the
+   * PRIMARY source for Filter 4's IV history, taking precedence over the
+   * SEC-filings-derived dates (filing dates lag the actual announcement).
+   */
+  confirmedHistoricalDates?: string[] | null;
 }
 
 /**
@@ -1133,6 +1140,21 @@ export async function fetchPolygonEarningsData(
       );
       return null;
     }
+  }
+
+  // --- Primary: exchange-confirmed historical earnings dates (TMX Corporate
+  // Events). Actual announcement dates beat SEC filing dates, which lag the
+  // announcement by days — so when 4+ confirmed dates exist, anchor Filter 4's
+  // volatility history on them regardless of how many filings Polygon has. ---
+  const confirmed = opts.confirmedHistoricalDates;
+  if (confirmed && confirmed.length >= 4) {
+    const confirmedDates = confirmed.slice(0, 4);
+    if (nextEarningsDate === null) {
+      const next = new Date(confirmedDates[0]! + "T00:00:00");
+      next.setDate(next.getDate() + 91);
+      nextEarningsDate = next.toISOString().split("T")[0]!;
+    }
+    return { nextEarningsDate, earningsIvHistory: await computeIvHistory(confirmedDates) };
   }
 
   if (filings.length >= 4) {
@@ -1317,12 +1339,17 @@ export async function fetchPolygonEarningsDataCached(
   ticker: string,
   opts: PolygonEarningsFetchOptions = {},
 ): Promise<PolygonEarningsResult> {
-  const hit = polygonEarningsCache.get(ticker);
+  // Cache key includes whether confirmed (TMX) history was available, so a
+  // result computed before TMX data arrived cannot mask the TMX-anchored
+  // recomputation once 4+ confirmed dates become available (and vice versa).
+  const hasConfirmed = (opts.confirmedHistoricalDates?.length ?? 0) >= 4;
+  const cacheKey = `${ticker}:${hasConfirmed ? "tmx" : "std"}`;
+  const hit = polygonEarningsCache.get(cacheKey);
   if (hit && Date.now() - hit.fetchedAt < POLYGON_EARNINGS_CACHE_TTL_MS) return hit.data;
 
   const data = await fetchPolygonEarningsData(apiKey, ticker, opts);
   if (data.nextEarningsDate !== null) {
-    polygonEarningsCache.set(ticker, { data, fetchedAt: Date.now() });
+    polygonEarningsCache.set(cacheKey, { data, fetchedAt: Date.now() });
   }
   return data;
 }
@@ -1678,6 +1705,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     // indirectly: callers already hold a rate-limiter slot from the enclosing
     // fetchStockData call, so no extra throttling is needed here).
     return fetchPolygonEarningsDataCached(this.apiKey, ticker, {
+      confirmedHistoricalDates: tmx?.historicalEarningsDates ?? null,
       historicalEarningsDatesFetcher: tmxAwareHistoryFetcher(tmx),
     });
   }
@@ -2009,7 +2037,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
         ),
         this.fetchOptionsStats(symbol),
         this.fetchAvgVolume(symbol),
-        this.fetchEarningsData(symbol),
+        this.fetchEarningsData(symbol, tmx),
         this.fetchUpcomingEvents(symbol),
       ]);
       const { earningsIvHistory } = earningsData;
@@ -2979,10 +3007,27 @@ export class ThetaDataProvider implements IMarketDataProvider {
             return 0;
           })();
 
+      // TMX Corporate Events: confirmed upcoming + historical earnings dates.
+      // Routed through the shared Polygon limiter (same request budget).
+      const tmx = this.polygonApiKey
+        ? await fetchTmxEarningsEventsCached(this.polygonApiKey, symbol, {
+            acquireSlot: this.polygonLimiter ? () => this.polygonLimiter!.acquire() : undefined,
+          }).catch((err: unknown) => {
+            console.warn(
+              `[ThetaDataProvider] ${symbol}: unexpected TMX-events failure — ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+            );
+            return null;
+          })
+        : null;
+
       // Supplement ThetaData options data with Polygon earnings data when available.
       // This eliminates the bypass on Filters 2, 4, and 5.
       const earningsData = this.polygonApiKey
-        ? await fetchPolygonEarningsDataCached(this.polygonApiKey, symbol).catch((err: unknown) => {
+        ? await fetchPolygonEarningsDataCached(this.polygonApiKey, symbol, {
+            confirmedHistoricalDates: tmx?.historicalEarningsDates ?? null,
+            historicalEarningsDatesFetcher: tmxAwareHistoryFetcher(tmx),
+          }).catch((err: unknown) => {
             // fetchPolygonEarningsData never throws, so this only fires on
             // unexpected faults (e.g. cache layer bugs). Log — never silent.
             console.warn(
@@ -3010,7 +3055,11 @@ export class ThetaDataProvider implements IMarketDataProvider {
 
       // Overlay confirmed calendar date on the Polygon estimate. Runs even
       // without a Polygon key — ThetaData mode gains confirmed dates too.
-      const resolvedEarnings = await resolveEarningsDate(symbol, earningsData.nextEarningsDate);
+      const resolvedEarnings = await resolveEarningsDate(
+        symbol,
+        earningsData.nextEarningsDate,
+        tmx?.nextEarningsDate ?? null,
+      );
 
       return {
         symbol,
