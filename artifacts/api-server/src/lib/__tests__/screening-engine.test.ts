@@ -300,28 +300,45 @@ describe("getFilterDefinitions()", () => {
 // ===========================================================================
 
 describe("Filter 2 — Earnings in 2 Weeks: boundary cases", () => {
-  it("passes when earnings are exactly 14 days out (lower bound)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(14) });
+  it("passes when confirmed earnings are exactly 14 days out (lower bound)", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(14), earningsDateSource: "confirmed" });
     const result = filter2.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, true, "14 days out must be inside the window");
+    assert.equal(result.passed, true, "confirmed 14 days out must be inside the window");
   });
 
-  it("passes when earnings are exactly 18 days out (upper bound)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(18) });
+  it("passes when confirmed earnings are exactly 18 days out (upper bound)", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(18), earningsDateSource: "confirmed" });
     const result = filter2.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, true, "18 days out must be inside the window");
+    assert.equal(result.passed, true, "confirmed 18 days out must be inside the window");
   });
 
   it("fails when earnings are 13 days out (one day below lower bound — too close)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(13) });
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(13), earningsDateSource: "confirmed" });
     const result = filter2.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed, false, "13 days out must be rejected — too close to enter");
   });
 
   it("fails when earnings are 19 days out (one day above upper bound — too early)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(19) });
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(19), earningsDateSource: "confirmed" });
     const result = filter2.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed, false, "19 days out must be rejected — not yet in the entry window");
+  });
+
+  it("fails when an ESTIMATED date falls inside the window — only confirmed dates qualify", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16), earningsDateSource: "estimated" });
+    const result = filter2.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "estimated in-window date must fail — not confirmed");
+    assert.equal(result.bypassed, false, "estimated date is a real failure, not a bypass");
+    assert.ok(
+      result.explanation.toLowerCase().includes("not yet confirmed"),
+      `explanation must say the date is unconfirmed (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails when the earnings date source is missing (legacy provider) even if in-window", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16) }); // no earningsDateSource
+    const result = filter2.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "unknown source must not count as confirmed");
   });
 
   it("is bypassed (passed=false, bypassed=true) when nextEarningsDate is null — data provider has no earnings calendar", () => {
@@ -355,7 +372,7 @@ describe("Filter 2 — Earnings in 2 Weeks: boundary cases", () => {
 
 describe("Filter 2 — Earnings in 2 Weeks: result shape", () => {
   it("result.name includes 'Filter 2'", () => {
-    const result = filter2.evaluate(baseStock({ nextEarningsDate: dateFromFixed(16) }), FIXED_TODAY);
+    const result = filter2.evaluate(baseStock({ nextEarningsDate: dateFromFixed(16), earningsDateSource: "confirmed" }), FIXED_TODAY);
     assert.ok(result.name.includes("Filter 2"), `name must include 'Filter 2' (got: "${result.name}")`);
   });
 
@@ -652,10 +669,12 @@ describe("Filter 5 — Earnings Verified 2 Weeks Out: independent re-verificatio
   it("uses the same 14–18 day window as Filter 2 (shares EARNINGS_WINDOW constants)", () => {
     // Both filters must agree on a date that is exactly on the boundary.
     // Use the same FIXED_TODAY for both so the comparison is deterministic.
-    const onBoundary14 = baseStock({ nextEarningsDate: dateFromFixed(14) });
-    const onBoundary18 = baseStock({ nextEarningsDate: dateFromFixed(18) });
-    const justOutside13 = baseStock({ nextEarningsDate: dateFromFixed(13) });
-    const justOutside19 = baseStock({ nextEarningsDate: dateFromFixed(19) });
+    // Use confirmed dates so Filter 2's confirmed-source requirement is
+    // satisfied and the comparison isolates the day-window boundaries.
+    const onBoundary14 = baseStock({ nextEarningsDate: dateFromFixed(14), earningsDateSource: "confirmed" });
+    const onBoundary18 = baseStock({ nextEarningsDate: dateFromFixed(18), earningsDateSource: "confirmed" });
+    const justOutside13 = baseStock({ nextEarningsDate: dateFromFixed(13), earningsDateSource: "confirmed" });
+    const justOutside19 = baseStock({ nextEarningsDate: dateFromFixed(19), earningsDateSource: "confirmed" });
 
     // Filter 5 must independently agree with Filter 2 on every boundary
     assert.equal(filter5.evaluate(onBoundary14, FIXED_TODAY).passed, filter2.evaluate(onBoundary14, FIXED_TODAY).passed, "F5 and F2 must agree at 14d");
@@ -1329,6 +1348,7 @@ function fullyQualifiedStock(): StockQuote {
     openInterest: 800_000,
     sector: "tech",
     nextEarningsDate: dateFromFixed(16),
+    earningsDateSource: "confirmed", // F2 now requires a confirmed date
     upcomingEvents: [], // events lookup succeeded, calendar clean → F5 event check passes
     liquidityMetrics: {
       hasWeeklyOptions: true,

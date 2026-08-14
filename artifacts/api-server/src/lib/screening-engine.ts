@@ -183,7 +183,11 @@ const filter2: IFilterRule = {
       (earningsDate.getTime() - _today.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    const passed = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
+    const inWindow = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
+    // Estimated dates (+91-day projections) can be off by days or weeks —
+    // only an exchange/calendar-CONFIRMED date is a reliable entry signal.
+    const isConfirmed = stock.earningsDateSource === "confirmed";
+    const passed = inWindow && isConfirmed;
     const sourceLabel = earningsSourceLabel(stock);
 
     return {
@@ -194,9 +198,11 @@ const filter2: IFilterRule = {
         daysUntil < 0
           ? `${Math.abs(daysUntil)}d ago`
           : `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel})`,
-      threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
+      threshold: `Confirmed earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
       explanation: passed
         ? `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}${sourceLabel}) — squarely in the 2-week entry window.`
+        : inWindow && !isConfirmed
+        ? `${stock.symbol}'s earnings estimate falls in the window (${daysUntil} days out, ${stock.nextEarningsDate}), but the date is not yet confirmed by the exchange or earnings calendar. Only confirmed dates qualify — re-check once the announcement date is confirmed.`
         : daysUntil < 0
         ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Next cycle not yet estimated.`
         : daysUntil < EARNINGS_WINDOW_MIN
