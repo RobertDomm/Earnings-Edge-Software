@@ -284,13 +284,17 @@ describe("getFilterDefinitions()", () => {
     }
   });
 
-  it("Filter 4 description references realized volatility (RV proxy), not raw implied volatility", () => {
+  it("Filter 4 description references real implied volatility, not a realized-vol proxy", () => {
     const filter4Def = defs.find((d) => d.name.includes("Filter 4"));
     assert.ok(filter4Def, "Filter 4 definition must exist");
     const desc = filter4Def!.description.toLowerCase();
     assert.ok(
-      desc.includes("realized") || desc.includes("rv") || desc.includes("proxy"),
-      `Filter 4 description must mention realized volatility or proxy usage (got: "${filter4Def!.description}")`
+      desc.includes("implied volatility"),
+      `Filter 4 description must mention implied volatility (got: "${filter4Def!.description}")`
+    );
+    assert.ok(
+      !desc.includes("realized") && !desc.includes("proxy"),
+      `Filter 4 description must not mention realized volatility or a proxy (got: "${filter4Def!.description}")`
     );
   });
 });

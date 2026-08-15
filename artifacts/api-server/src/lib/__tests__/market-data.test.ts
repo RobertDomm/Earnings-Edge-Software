@@ -320,9 +320,11 @@ describe("LiveMarketDataProvider universe cache", () => {
     );
   });
 
-  it("fetchEarningsData: nextEarningsDate is preserved when aggregates fetch fails", async () => {
-    // Financials succeeds with 4 filings; aggregates throws → earningsIvHistory
-    // must be null but nextEarningsDate must still be populated.
+  it("fetchEarningsData: nextEarningsDate populated; earningsIvHistory null (Live provider has no IV source)", async () => {
+    // Financials succeeds with 4 filings → nextEarningsDate must be populated.
+    // The Live (Polygon-only) provider has no historical implied-vol source,
+    // so earningsIvHistory must be null (Filter 4 bypasses) — never a
+    // realized-vol proxy.
     const FILING_DATE = "2026-05-08"; // arbitrary past date
     let financialsCalls = 0;
 
@@ -347,11 +349,8 @@ describe("LiveMarketDataProvider universe cache", () => {
           status: "OK",
         });
       }
-      // Aggregates for IV history (limit=250) fail; avg-volume aggregates (limit=30) succeed
+      // Avg-volume aggregates succeed (there is no IV-history aggregates call anymore)
       if (path.includes("/v2/aggs/ticker/")) {
-        if (urlObj.searchParams.get("limit") === "250") {
-          return new Response("Internal Server Error", { status: 500 });
-        }
         return makeJsonResponse({
           results: Array.from({ length: 30 }, (_, i) => ({
             v: 50_000_000 + i * 100_000,
@@ -388,16 +387,16 @@ describe("LiveMarketDataProvider universe cache", () => {
     expectedNext.setDate(expectedNext.getDate() + 91);
     const expectedDateStr = expectedNext.toISOString().split("T")[0]!;
 
-    assert.ok(quote !== null, "getStockQuote should succeed despite aggregates failure");
+    assert.ok(quote !== null, "getStockQuote should succeed");
     assert.equal(
       quote!.nextEarningsDate,
       expectedDateStr,
-      `nextEarningsDate must survive aggregates failure (got ${quote!.nextEarningsDate})`
+      `nextEarningsDate must be derived from the latest filing (got ${quote!.nextEarningsDate})`
     );
     assert.equal(
       quote!.earningsIvHistory,
       null,
-      "earningsIvHistory must be null when aggregates are unavailable"
+      "earningsIvHistory must be null in Polygon-only mode — no realized-vol proxy"
     );
 
     // Only one financials call should have been made (not two)

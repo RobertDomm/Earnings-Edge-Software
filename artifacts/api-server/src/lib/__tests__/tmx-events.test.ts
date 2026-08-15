@@ -165,16 +165,14 @@ describe("fetchTmxEarningsEventsCached — 24h success-only cache", () => {
 });
 
 describe("fetchPolygonEarningsData — TMX confirmed history is the primary Filter 4 anchor", () => {
-  // 4 SEC filing dates vs 4 TMX-confirmed announcement dates. The aggregates
-  // request range reveals which set anchored the IV history: its `to` date is
-  // (mostRecentDate - 1 day).
+  // 4 SEC filing dates vs 4 TMX-confirmed announcement dates. The returned
+  // historicalEarningsDates reveal which set anchors Filter 4's IV history.
   const FILINGS = ["2026-06-30", "2026-03-31", "2025-12-31", "2025-09-30"];
   const TMX_DATES = ["2026-05-14", "2026-02-11", "2025-11-15", "2025-08-12"];
 
-  /** Stubs global fetch for Polygon financials + aggregates endpoints. */
-  function stubPolygon(): { aggsUrls: string[]; financialsCalls: () => number; restore: () => void } {
+  /** Stubs global fetch for the Polygon financials endpoint. */
+  function stubPolygon(): { financialsCalls: () => number; restore: () => void } {
     const original = globalThis.fetch;
-    const aggsUrls: string[] = [];
     let fin = 0;
     globalThis.fetch = (async (input: unknown) => {
       const url = String(input);
@@ -185,25 +183,19 @@ describe("fetchPolygonEarningsData — TMX confirmed history is the primary Filt
           json: async () => ({ results: FILINGS.map((d) => ({ filing_date: d })) }),
         } as Response;
       }
-      if (url.includes("/v2/aggs/")) {
-        aggsUrls.push(url);
-        return { ok: true, status: 200, json: async () => ({ results: [] }) } as Response;
-      }
       throw new Error(`unexpected URL: ${url}`);
     }) as typeof fetch;
-    return { aggsUrls, financialsCalls: () => fin, restore: () => { globalThis.fetch = original; } };
+    return { financialsCalls: () => fin, restore: () => { globalThis.fetch = original; } };
   }
 
   it("anchors IV history on TMX dates even when Polygon has 4 filings", async () => {
     const stub = stubPolygon();
     try {
-      await fetchPolygonEarningsData("k", "AAPL", {
+      const result = await fetchPolygonEarningsData("k", "AAPL", {
         retryBaseMs: 1,
         confirmedHistoricalDates: TMX_DATES,
       });
-      assert.equal(stub.aggsUrls.length, 1);
-      // to-date = most recent TMX date - 1 day (not filing date - 1)
-      assert.ok(stub.aggsUrls[0]!.includes("/2026-05-13?"), `aggs range must end at TMX[0]-1: ${stub.aggsUrls[0]}`);
+      assert.deepEqual(result.historicalEarningsDates, TMX_DATES, "anchor dates must be the TMX dates, not filings");
     } finally {
       stub.restore();
     }
@@ -212,11 +204,11 @@ describe("fetchPolygonEarningsData — TMX confirmed history is the primary Filt
   it("falls back to filings when fewer than 4 TMX dates are supplied", async () => {
     const stub = stubPolygon();
     try {
-      await fetchPolygonEarningsData("AAPL2", "AAPL", {
+      const result = await fetchPolygonEarningsData("AAPL2", "AAPL", {
         retryBaseMs: 1,
         confirmedHistoricalDates: TMX_DATES.slice(0, 2),
       });
-      assert.ok(stub.aggsUrls[0]!.includes("/2026-06-29?"), `aggs range must end at filing[0]-1: ${stub.aggsUrls[0]}`);
+      assert.deepEqual(result.historicalEarningsDates, FILINGS, "anchor dates must fall back to the 4 filing dates");
     } finally {
       stub.restore();
     }
@@ -227,16 +219,17 @@ describe("fetchPolygonEarningsData — TMX confirmed history is the primary Filt
     const stub = stubPolygon();
     try {
       // First scan: no TMX data yet → filings-anchored result gets cached.
-      await fetchPolygonEarningsDataCached("k", "AAPL", { retryBaseMs: 1 });
+      const first = await fetchPolygonEarningsDataCached("k", "AAPL", { retryBaseMs: 1 });
       assert.equal(stub.financialsCalls(), 1);
+      assert.deepEqual(first.historicalEarningsDates, FILINGS);
 
       // TMX becomes available → must recompute (different cache key), anchored on TMX.
-      await fetchPolygonEarningsDataCached("k", "AAPL", {
+      const second = await fetchPolygonEarningsDataCached("k", "AAPL", {
         retryBaseMs: 1,
         confirmedHistoricalDates: TMX_DATES,
       });
       assert.equal(stub.financialsCalls(), 2, "TMX arrival must bypass the pre-TMX cache entry");
-      assert.ok(stub.aggsUrls[1]!.includes("/2026-05-13?"), "recomputation must anchor on TMX dates");
+      assert.deepEqual(second.historicalEarningsDates, TMX_DATES, "recomputation must anchor on TMX dates");
 
       // Both variants now cached — repeat calls hit the cache.
       await fetchPolygonEarningsDataCached("k", "AAPL", { retryBaseMs: 1 });

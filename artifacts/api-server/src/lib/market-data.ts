@@ -127,17 +127,18 @@ export interface DataFreshness {
 }
 
 /**
- * Historical IV behaviour around one past earnings announcement.
- * The live provider approximates IV using annualized close-to-close
- * realized volatility (the only historical vol metric available via
- * Polygon's standard aggregates endpoint).
+ * Historical implied-volatility behaviour around one past earnings
+ * announcement. IV values are real option implied volatilities from
+ * ThetaData's end-of-day historical greeks (near-ATM average per day).
+ * Providers with no historical IV source return null history instead
+ * (Filter 4 bypasses) — there is no realized-vol fallback.
  */
 export interface EarningsIvRecord {
-  /** The earnings announcement date (YYYY-MM-DD, approximated by SEC filing date). */
+  /** The earnings announcement date (YYYY-MM-DD). */
   earningsDate: string;
-  /** Annualized realized vol in the ~5 trading days immediately before earnings. */
+  /** Mean near-ATM implied vol in the ~2–7 calendar days before earnings. */
   ivBeforeEarnings: number;
-  /** Annualized realized vol in the baseline window ~30–15 days before earnings. */
+  /** Mean near-ATM implied vol in the baseline window ~15–40 days before earnings. */
   ivBaseline: number;
   /** True when ivBeforeEarnings > ivBaseline (IV expanded into earnings). */
   ivRose: boolean;
@@ -858,28 +859,10 @@ function isPennyIncrement(price: number): boolean {
  * Returns a YYYY-MM-DD string offset by `days` from a given ISO date string.
  * Positive = forward, negative = backward.
  */
-function dateOffsetFrom(isoDate: string, days: number): string {
+export function dateOffsetFrom(isoDate: string, days: number): string {
   const d = new Date(isoDate + "T00:00:00");
   d.setDate(d.getDate() + days);
   return d.toISOString().split("T")[0]!;
-}
-
-/**
- * Computes annualized close-to-close realized volatility from an array of
- * daily closing prices. Returns 0 when there are fewer than 3 data points.
- */
-function realizedVol(closes: number[]): number {
-  if (closes.length < 3) return 0;
-  const logReturns: number[] = [];
-  for (let i = 1; i < closes.length; i++) {
-    const prev = closes[i - 1]!;
-    const cur  = closes[i]!;
-    if (prev > 0 && cur > 0) logReturns.push(Math.log(cur / prev));
-  }
-  if (logReturns.length < 2) return 0;
-  const mean = logReturns.reduce((a, b) => a + b, 0) / logReturns.length;
-  const variance = logReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / logReturns.length;
-  return Math.sqrt(variance * 252); // annualize: √(daily variance × 252 trading days)
 }
 
 /**
@@ -1008,10 +991,18 @@ export interface PolygonEarningsFetchOptions {
 }
 
 /**
- * Fetches the last 4 quarterly earnings dates and realized-vol history from
- * Polygon.io for a single ticker.  Used by LiveMarketDataProvider directly and
- * by ThetaDataProvider (via fetchPolygonEarningsDataCached) when
+ * Fetches the last 4 quarterly earnings dates from Polygon.io for a single
+ * ticker and resolves the historical anchor dates used by Filter 4's implied-
+ * volatility history.  Used by LiveMarketDataProvider directly and by
+ * ThetaDataProvider (via fetchPolygonEarningsDataCached) when
  * MARKET_DATA_API_KEY is set.
+ *
+ * `historicalEarningsDates` are the 4 past earnings dates (most recent first)
+ * chosen with the priority: TMX exchange-confirmed dates → SEC filing dates →
+ * Nasdaq reported dates (foreign-ADR fallback). Null when fewer than 4 usable
+ * dates exist. The dates themselves carry no volatility data — the ThetaData
+ * provider fetches real historical implied vol for these cycles; providers
+ * without a historical IV source leave the IV history null (Filter 4 bypasses).
  *
  * Failures never throw — they resolve with null fields — but every failure is
  * logged with the ticker and a classified reason (throttling / auth / server /
@@ -1023,7 +1014,7 @@ export async function fetchPolygonEarningsData(
   apiKey: string,
   ticker: string,
   opts: PolygonEarningsFetchOptions = {},
-): Promise<{ nextEarningsDate: string | null; earningsIvHistory: EarningsIvRecord[] | null }> {
+): Promise<{ nextEarningsDate: string | null; historicalEarningsDates: string[] | null }> {
   const baseUrl = "https://api.polygon.io";
   const maxRetries = opts.retries ?? 2;
   const retryBaseMs = opts.retryBaseMs ?? 250;
@@ -1073,7 +1064,7 @@ export async function fetchPolygonEarningsData(
       `[PolygonEarnings] ${ticker}: financials fetch failed after retries — ${classifyPolygonError(err)}. ` +
       `Earnings date unavailable; Filters 2/5 will bypass this ticker.`,
     );
-    return { nextEarningsDate: null, earningsIvHistory: null };
+    return { nextEarningsDate: null, historicalEarningsDates: null };
   }
 
   if (filings.length === 0) {
@@ -1089,63 +1080,10 @@ export async function fetchPolygonEarningsData(
     nextEarningsDate = next.toISOString().split("T")[0]!;
   }
 
-  // --- Step 2: price aggregates for IV history over a set of earnings dates
-  // (dates must be YYYY-MM-DD, most recent first). Returns null on failure or
-  // when fewer than 4 usable cycles result. ---
-  async function computeIvHistory(earningsDates: string[]): Promise<EarningsIvRecord[] | null> {
-    try {
-      const earliest = earningsDates[earningsDates.length - 1]!;
-      const priceFrom = dateOffsetFrom(earliest, -50);
-      const priceTo   = dateOffsetFrom(earningsDates[0]!, -1);
-
-      const aggs = await polyFetch<PolygonAggregatesResponse>(
-        `/v2/aggs/ticker/${ticker}/range/1/day/${priceFrom}/${priceTo}`,
-        { adjusted: "true", sort: "asc", limit: "250" },
-      );
-
-      const bars = (aggs.results ?? []).filter((b) => b.t && b.c);
-      const records: EarningsIvRecord[] = [];
-
-      for (const earningsDate of earningsDates) {
-        const earningsTs = new Date(earningsDate + "T00:00:00").getTime();
-        const preCloses: number[]  = [];
-        const baseCloses: number[] = [];
-
-        for (const bar of bars) {
-          const barDate = new Date(bar.t!).toISOString().split("T")[0]!;
-          const daysTo = Math.round(
-            (earningsTs - new Date(barDate + "T00:00:00").getTime()) / 86_400_000,
-          );
-          if (daysTo >= 2  && daysTo <= 7)  preCloses.push(bar.c!);
-          if (daysTo >= 15 && daysTo <= 40) baseCloses.push(bar.c!);
-        }
-
-        const ivBefore   = realizedVol(preCloses);
-        const ivBaseline = realizedVol(baseCloses);
-        if (ivBefore === 0 || ivBaseline === 0) continue;
-
-        records.push({
-          earningsDate,
-          ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
-          ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
-          ivRose:           ivBefore > ivBaseline,
-        });
-      }
-
-      return records.length >= 4 ? records : null;
-    } catch (err) {
-      console.warn(
-        `[PolygonEarnings] ${ticker}: price-aggregates fetch failed after retries — ${classifyPolygonError(err)}. ` +
-        `IV history unavailable; earnings date (${nextEarningsDate ?? "null"}) kept.`,
-      );
-      return null;
-    }
-  }
-
   // --- Primary: exchange-confirmed historical earnings dates (TMX Corporate
   // Events). Actual announcement dates beat SEC filing dates, which lag the
   // announcement by days — so when 4+ confirmed dates exist, anchor Filter 4's
-  // volatility history on them regardless of how many filings Polygon has. ---
+  // IV history on them regardless of how many filings Polygon has. ---
   const confirmed = opts.confirmedHistoricalDates;
   if (confirmed && confirmed.length >= 4) {
     const confirmedDates = confirmed.slice(0, 4);
@@ -1154,17 +1092,17 @@ export async function fetchPolygonEarningsData(
       next.setDate(next.getDate() + 91);
       nextEarningsDate = next.toISOString().split("T")[0]!;
     }
-    return { nextEarningsDate, earningsIvHistory: await computeIvHistory(confirmedDates) };
+    return { nextEarningsDate, historicalEarningsDates: confirmedDates };
   }
 
   if (filings.length >= 4) {
-    return { nextEarningsDate, earningsIvHistory: await computeIvHistory(filings) };
+    return { nextEarningsDate, historicalEarningsDates: filings.slice(0, 4) };
   }
 
   // --- Fallback: Polygon has <4 quarterly filings (typical for foreign ADRs
   // like BABA/TSM, which never appear in the SEC-filings feed). Pull actual
-  // past reported earnings dates from Nasdaq and build the volatility history
-  // from those instead, so Filter 4 gets a real pass/fail. US names with full
+  // past reported earnings dates from Nasdaq and anchor the IV history on
+  // those instead, so Filter 4 gets a real pass/fail. US names with full
   // filings never reach this path. ---
   const historyFetcher =
     opts.historicalEarningsDatesFetcher ??
@@ -1178,7 +1116,7 @@ export async function fetchPolygonEarningsData(
         `Nasdaq-reported earnings dates — IV history unavailable; Filter 4 will bypass.`,
       );
     }
-    return { nextEarningsDate, earningsIvHistory: null };
+    return { nextEarningsDate, historicalEarningsDates: null };
   }
 
   const fallbackDates = pastDates.slice(0, 4);
@@ -1192,7 +1130,7 @@ export async function fetchPolygonEarningsData(
     nextEarningsDate = next.toISOString().split("T")[0]!;
   }
 
-  return { nextEarningsDate, earningsIvHistory: await computeIvHistory(fallbackDates) };
+  return { nextEarningsDate, historicalEarningsDates: fallbackDates };
 }
 
 // ---------------------------------------------------------------------------
@@ -1204,7 +1142,7 @@ export async function fetchPolygonEarningsData(
 // refresh retries them.
 // ---------------------------------------------------------------------------
 
-type PolygonEarningsResult = { nextEarningsDate: string | null; earningsIvHistory: EarningsIvRecord[] | null };
+type PolygonEarningsResult = { nextEarningsDate: string | null; historicalEarningsDates: string[] | null };
 
 const POLYGON_EARNINGS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const polygonEarningsCache = new Map<string, { data: PolygonEarningsResult; fetchedAt: number }>();
@@ -1669,33 +1607,17 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
    * options IV. RV and IV are directionally correlated around earnings events.
    */
   /**
-   * Single /vX/reference/financials fetch that serves both earnings needs:
-   *  - nextEarningsDate: derived from the most-recent filing date + 91 days
-   *  - earningsIvHistory: realized-vol pattern over the last 4 quarterly cycles
+   * Single /vX/reference/financials fetch that provides nextEarningsDate
+   * (most-recent filing date + 91 days).
    *
    * Fetching limit:"4" instead of two separate calls (limit:"1" + limit:"4")
    * removes one Polygon API call per ticker — 60+ fewer calls per scan cycle.
    *
-   * Returns null for earningsIvHistory when fewer than 4 cycles of usable
-   * price data exist.  Returns null for nextEarningsDate on any API error.
-   * Degrades gracefully on any failure.
-   */
-  /**
-   * Single /vX/reference/financials fetch that serves both earnings needs:
-   *  - nextEarningsDate: derived from the most-recent filing date + 91 days
-   *  - earningsIvHistory: realized-vol pattern over the last 4 quarterly cycles
-   *
-   * Fetching limit:"4" instead of two separate calls (limit:"1" + limit:"4")
-   * removes one Polygon API call per ticker — 60+ fewer calls per scan cycle.
-   *
-   * Fault isolation: the financials call and the subsequent aggregates call
-   * have separate error boundaries.  If the aggregates fetch fails (e.g.
-   * transient outage) nextEarningsDate is still returned from the already-
-   * succeeded financials result; only earningsIvHistory is nulled out.
-   *
-   * Returns null for earningsIvHistory when fewer than 4 cycles of usable
-   * price data exist.  Returns null for nextEarningsDate only when the
-   * financials call itself fails.
+   * This provider has NO historical implied-volatility source (Polygon's
+   * standard plan does not expose historical options IV), so earningsIvHistory
+   * is always null here and Filter 4 bypasses with a clear explanation.
+   * Real IV history requires the ThetaData provider. There is deliberately
+   * no realized-vol fallback — that would be a silent proxy, not IV.
    */
   private async fetchEarningsData(ticker: string, tmx: TmxEarningsEvents | null = null): Promise<{
     nextEarningsDate: string | null;
@@ -1704,10 +1626,11 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     // Delegate to the shared module-level helper (rate-limited via this.limiter
     // indirectly: callers already hold a rate-limiter slot from the enclosing
     // fetchStockData call, so no extra throttling is needed here).
-    return fetchPolygonEarningsDataCached(this.apiKey, ticker, {
+    const { nextEarningsDate } = await fetchPolygonEarningsDataCached(this.apiKey, ticker, {
       confirmedHistoricalDates: tmx?.historicalEarningsDates ?? null,
       historicalEarningsDatesFetcher: tmxAwareHistoryFetcher(tmx),
     });
+    return { nextEarningsDate, earningsIvHistory: null };
   }
 
   /**
@@ -2443,6 +2366,145 @@ function tdEncodeOptionSnapshotReq(
   ]);
 }
 
+/**
+ * Encode an OptionHistoryGreeksEodRequest (BetaEndpoints).
+ *
+ * Params (OptionHistoryGreeksEodRequestQuery, decoded from the Python SDK's
+ * v3grpc/endpoints_pb2.py descriptor):
+ *   contract_spec=1 (Endpoints.ContractSpec: symbol=1, expiration=2, strike=3, right=4)
+ *   expiration=2, start_date=3, end_date=4 (YYYY-MM-DD strings)
+ *   annual_dividend=5, rate_type=6, rate_value=7, version=8,
+ *   underlyer_use_nbbo=9, max_dte=10, strike_range=11
+ */
+function tdEncodeOptionHistoryGreeksEodReq(
+  sessionId: string, email: string,
+  symbol: string, expiration: string, startDate: string, endDate: string,
+  right: "call" | "put" | "both" = "call",
+): Buffer {
+  const contractSpec = [
+    ...pbStr(1, symbol),
+    ...pbStr(2, expiration),
+    ...pbStr(3, "*"),
+    ...pbStr(4, right),
+  ];
+  const params = [
+    ...pbLen(1, contractSpec),
+    ...pbStr(3, startDate),
+    ...pbStr(4, endDate),
+  ];
+  return Buffer.from([
+    ...pbLen(1, tdQueryInfo(sessionId, email)),
+    ...pbLen(2, params),
+  ]);
+}
+
+// ---- Historical implied-volatility helpers (Filter 4) ----
+
+/** IV-history window offsets (calendar days before an earnings date). */
+export const IV_PRE_WINDOW  = { from: 7, to: 2 }  as const;
+export const IV_BASE_WINDOW = { from: 40, to: 15 } as const;
+
+/**
+ * Returns the standard monthly option expiration (third Friday, YYYY-MM-DD)
+ * strictly AFTER the given date. Monthly expirations are used for historical
+ * IV because they reliably existed for large-cap names a year back, unlike
+ * weeklies whose availability varies.
+ */
+export function monthlyExpirationAfter(isoDate: string): string {
+  const d = new Date(isoDate + "T00:00:00Z");
+  for (let i = 0; i < 3; i++) {
+    const first = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + i, 1));
+    // Day-of-month of the first Friday, then +14 → third Friday.
+    const firstFriday = 1 + ((5 - first.getUTCDay() + 7) % 7);
+    const thirdFriday = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), firstFriday + 14));
+    if (thirdFriday.getTime() > d.getTime()) {
+      return thirdFriday.toISOString().split("T")[0]!;
+    }
+  }
+  /* istanbul ignore next -- unreachable: the loop always finds a third Friday */
+  throw new Error(`monthlyExpirationAfter: no expiration found after ${isoDate}`);
+}
+
+/**
+ * Reduce raw EOD-greeks rows to one near-ATM implied vol per trading day.
+ *
+ * For each day (rows grouped by their EOD timestamp's UTC date) the row whose
+ * strike is closest to that day's underlying price — among rows with a usable
+ * implied_vol — is selected, and the mean implied_vol of the 3 closest such
+ * strikes is returned. Days with no usable IV are omitted.
+ */
+export function computeDailyAtmIv(
+  rows: Array<Record<string, TdValue>>,
+): Map<string, number> {
+  const byDay = new Map<string, Array<{ strike: number; iv: number; underlying: number }>>();
+  for (const row of rows) {
+    const ts = tdGetNum(row, "timestamp");
+    const strike = tdGetNum(row, "strike");
+    const iv = tdGetNum(row, "implied_vol");
+    const underlying = tdGetNum(row, "underlying_price");
+    if (ts <= 0 || strike <= 0 || underlying <= 0) continue;
+    if (!(iv > 0.005 && iv < 5)) continue; // discard failed/degenerate solves
+    const day = new Date(ts).toISOString().split("T")[0]!;
+    const list = byDay.get(day) ?? [];
+    list.push({ strike, iv, underlying });
+    byDay.set(day, list);
+  }
+
+  const result = new Map<string, number>();
+  for (const [day, list] of byDay) {
+    list.sort((a, b) => Math.abs(a.strike - a.underlying) - Math.abs(b.strike - b.underlying));
+    const nearest = list.slice(0, 3);
+    if (nearest.length === 0) continue;
+    const mean = nearest.reduce((s, r) => s + r.iv, 0) / nearest.length;
+    result.set(day, mean);
+  }
+  return result;
+}
+
+/**
+ * Build one EarningsIvRecord from a cycle's daily near-ATM IV series.
+ *
+ * ivBeforeEarnings = mean IV over calendar days −7…−2 before earnings;
+ * ivBaseline       = mean IV over calendar days −40…−15 before earnings.
+ * Returns null when either window has fewer than 2 usable days — a record
+ * built from a single print would be noise, not a pattern.
+ */
+export function buildEarningsIvRecord(
+  earningsDate: string,
+  dailyIv: Map<string, number>,
+): EarningsIvRecord | null {
+  const earningsTs = new Date(earningsDate + "T00:00:00Z").getTime();
+  const pre: number[] = [];
+  const base: number[] = [];
+  for (const [day, iv] of dailyIv) {
+    const daysTo = Math.round((earningsTs - new Date(day + "T00:00:00Z").getTime()) / 86_400_000);
+    if (daysTo >= IV_PRE_WINDOW.to && daysTo <= IV_PRE_WINDOW.from) pre.push(iv);
+    if (daysTo >= IV_BASE_WINDOW.to && daysTo <= IV_BASE_WINDOW.from) base.push(iv);
+  }
+  if (pre.length < 2 || base.length < 2) return null;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const ivBefore = mean(pre);
+  const ivBaseline = mean(base);
+  return {
+    earningsDate,
+    ivBeforeEarnings: parseFloat(ivBefore.toFixed(4)),
+    ivBaseline:       parseFloat(ivBaseline.toFixed(4)),
+    ivRose:           ivBefore > ivBaseline,
+  };
+}
+
+// Historical IV is expensive (one gRPC range query per earnings cycle), and
+// the underlying data never changes — cache successes for 24h per
+// ticker+anchor-dates combination. Failures are not cached so the next scan
+// retries.
+const THETA_IV_HISTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const thetaIvHistoryCache = new Map<string, { data: EarningsIvRecord[] | null; fetchedAt: number }>();
+
+/** Test hook: empty the per-ticker ThetaData IV-history cache. */
+export function clearThetaIvHistoryCache(): void {
+  thetaIvHistoryCache.clear();
+}
+
 // ---- Yahoo Finance stock quote fetcher ----
 // Used because the account has stockSubscription=0 (no stock data from ThetaData).
 
@@ -2760,6 +2822,76 @@ export class ThetaDataProvider implements IMarketDataProvider {
     return this.decodeStream(chunks);
   }
 
+  /**
+   * Fetch end-of-day historical greeks (incl. implied_vol) for every strike
+   * of one expiration over a date range.
+   */
+  private async getOptionHistoryGreeksEod(
+    symbol: string,
+    expiration: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<Array<Record<string, TdValue>>> {
+    const req = tdEncodeOptionHistoryGreeksEodReq(
+      this.sessionId, this.email, symbol, expiration, startDate, endDate,
+    );
+    const chunks = await this.callGrpcStream(
+      "/BetaEndpoints.BetaThetaTerminal/GetOptionHistoryGreeksEod",
+      req,
+    );
+    return this.decodeStream(chunks);
+  }
+
+  /**
+   * Build Filter 4's implied-volatility history from ThetaData historical
+   * EOD greeks: one gRPC range query per earnings cycle (call side of the
+   * first monthly expiration after that earnings date, days −40…−2), reduced
+   * to a near-ATM IV per day and averaged over the baseline (−40…−15) and
+   * pre-earnings (−7…−2) windows.
+   *
+   * Returns null (→ Filter 4 bypasses) when anchor dates are missing or any
+   * cycle lacks usable IV data; never throws. Successes are cached 24h.
+   */
+  private async fetchIvHistory(
+    symbol: string,
+    earningsDates: string[] | null,
+  ): Promise<EarningsIvRecord[] | null> {
+    if (!earningsDates || earningsDates.length < 4) return null;
+    const dates = earningsDates.slice(0, 4);
+    const cacheKey = `${symbol}:${dates.join(",")}`;
+    const hit = thetaIvHistoryCache.get(cacheKey);
+    if (hit && Date.now() - hit.fetchedAt < THETA_IV_HISTORY_CACHE_TTL_MS) return hit.data;
+
+    try {
+      const records = await Promise.all(
+        dates.map(async (earningsDate) => {
+          const expiration = monthlyExpirationAfter(earningsDate);
+          const startDate = dateOffsetFrom(earningsDate, -IV_BASE_WINDOW.from);
+          const endDate   = dateOffsetFrom(earningsDate, -IV_PRE_WINDOW.to);
+          const rows = await this.getOptionHistoryGreeksEod(symbol, expiration, startDate, endDate);
+          return buildEarningsIvRecord(earningsDate, computeDailyAtmIv(rows));
+        }),
+      );
+
+      const usable = records.filter((r): r is EarningsIvRecord => r !== null);
+      if (usable.length < dates.length) {
+        console.warn(
+          `[ThetaDataProvider] ${symbol}: historical IV usable for only ` +
+          `${usable.length}/${dates.length} earnings cycles — IV history unavailable; Filter 4 will bypass.`,
+        );
+        return null;
+      }
+      thetaIvHistoryCache.set(cacheKey, { data: usable, fetchedAt: Date.now() });
+      return usable;
+    } catch (err) {
+      console.warn(
+        `[ThetaDataProvider] ${symbol}: historical IV fetch failed — ` +
+        `${err instanceof Error ? err.message : String(err)}. Filter 4 will bypass.`,
+      );
+      return null;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Liquidity-metrics computation (same algorithm as LiveMarketDataProvider)
   // -------------------------------------------------------------------------
@@ -3036,10 +3168,17 @@ export class ThetaDataProvider implements IMarketDataProvider {
             );
             return {
               nextEarningsDate: null as string | null,
-              earningsIvHistory: null as EarningsIvRecord[] | null,
+              historicalEarningsDates: null as string[] | null,
             };
           })
-        : { nextEarningsDate: null as string | null, earningsIvHistory: null as EarningsIvRecord[] | null };
+        : { nextEarningsDate: null as string | null, historicalEarningsDates: null as string[] | null };
+
+      // Real historical implied volatility for Filter 4, fetched from
+      // ThetaData EOD greeks and anchored on the resolved earnings cycles.
+      const earningsIvHistory = await this.fetchIvHistory(
+        symbol,
+        earningsData.historicalEarningsDates,
+      );
 
       const upcomingEvents = this.polygonApiKey
         ? await fetchPolygonUpcomingEventsCached(this.polygonApiKey, symbol, {
@@ -3077,7 +3216,7 @@ export class ThetaDataProvider implements IMarketDataProvider {
         earningsDateSource:  resolvedEarnings.earningsDateSource,
         upcomingEvents,
         liquidityMetrics:    metrics?.liquidityMetrics ?? null,
-        earningsIvHistory:   earningsData.earningsIvHistory,
+        earningsIvHistory,
       };
     } catch {
       // Drop this ticker on error rather than zero-filling
