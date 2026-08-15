@@ -9,6 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
+    "pretest:e2e": "bash scripts/prepare-e2e.sh",
     "test:e2e": "LD_LIBRARY_PATH=\"$(pwd)/e2e-libs:$REPLIT_LD_LIBRARY_PATH:$LD_LIBRARY_PATH\" playwright test --config playwright.config.ts"
   },
   "devDependencies": {
