@@ -137,7 +137,7 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                   </TabsList>
                 </div>
                 
-                <div className="flex-1 overflow-auto bg-black/20 p-6">
+                <div className="flex-1 overflow-auto bg-muted/20 dark:bg-black/20 p-6">
                   <TabsContent value="overview" className="mt-0 h-full">
                     <div className="space-y-6">
                       {/* Trade setup callout — only shown for qualifying stocks with F6 data */}
@@ -252,7 +252,7 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                   <TabsContent value="filters" className="mt-0 h-full">
                     <div className="space-y-4">
                       {detail.stock.filterResults.map((fr, i) => (
-                        <div key={i} className="border border-border bg-black/20 p-4">
+                        <div key={i} className="border border-border bg-muted/20 dark:bg-black/20 p-4">
                           <div className="flex justify-between items-center mb-2">
                             <div className="flex items-center gap-3">
                               <Badge

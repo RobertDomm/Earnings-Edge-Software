@@ -141,7 +141,7 @@ export default function Dashboard() {
 
       <header className="border-b border-border bg-card/80 backdrop-blur-md z-10 sticky top-0 h-14 flex items-center justify-between px-6">
         <div className="flex items-center gap-1.5">
-          <img src="/edgefinder-logo-white.png" alt="Earnings Edge Software" className="h-10 w-10 object-contain" />
+          <img src="/edgefinder-logo-white.png" alt="Earnings Edge Software" className="h-10 w-10 object-contain invert dark:invert-0" />
           <h1 className="font-mono font-bold tracking-widest text-sm uppercase text-foreground">
             Earnings Edge Software{" "}
             <span className="text-muted-foreground opacity-50 ml-2">v0.1.0</span>
@@ -186,7 +186,7 @@ export default function Dashboard() {
           </div>
           <div className="lg:col-span-4 flex flex-col min-h-0">
             {isLoading ? (
-              <div className="flex-1 border border-border bg-black/20 flex flex-col items-center justify-center min-h-[400px]">
+              <div className="flex-1 border border-border bg-muted/20 dark:bg-black/20 flex flex-col items-center justify-center min-h-[400px]">
                 <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4" />
                 <span className="font-mono text-xs text-muted-foreground uppercase tracking-wider">
                   Awaiting Engine Data...
@@ -199,7 +199,7 @@ export default function Dashboard() {
         </div>
       </main>
 
-      <footer className="border-t border-border bg-card z-10 py-3 px-6">
+      <footer className="border-t border-border bg-card z-10 py-3 px-16">
         <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider text-center">
           For informational and educational purposes only. This tool does not
           constitute financial advice.

@@ -113,7 +113,7 @@ export function ScannerStatusWidget({
 
   if (isLoading) {
     return (
-      <Card className="rounded-none border-border/50 bg-black/40 shadow-none">
+      <Card className="rounded-none border-border/50 bg-muted/40 dark:bg-black/40 shadow-none">
         <CardContent className="p-4 flex items-center gap-4 animate-pulse">
           <div className="h-8 w-32 bg-muted/50 rounded-none" />
           <div className="h-4 w-48 bg-muted/50" />
@@ -123,7 +123,7 @@ export function ScannerStatusWidget({
   }
 
   return (
-    <Card className="rounded-none border-border bg-black/40 shadow-none backdrop-blur-sm relative overflow-hidden flex-1">
+    <Card className="rounded-none border-border bg-muted/40 dark:bg-black/40 shadow-none backdrop-blur-sm relative overflow-hidden flex-1">
       <div className="absolute top-0 left-0 w-1 h-full bg-primary/50" />
 
       {isServingCachedData && (
@@ -265,7 +265,7 @@ export function ScannerStatusWidget({
                 onIntervalChange(Number(v) as AutoRefreshIntervalOption)
               }
             >
-              <SelectTrigger className="h-7 w-[72px] rounded-none font-mono text-[11px] border-border bg-black/40 px-2">
+              <SelectTrigger className="h-7 w-[72px] rounded-none font-mono text-[11px] border-border bg-muted/40 dark:bg-black/40 px-2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-none border-border font-mono text-xs">
@@ -293,7 +293,7 @@ export function ScannerStatusWidget({
                 onFlashThresholdChange(Number(v) as FlashThresholdOption)
               }
             >
-              <SelectTrigger className="h-7 w-[72px] rounded-none font-mono text-[11px] border-border bg-black/40 px-2">
+              <SelectTrigger className="h-7 w-[72px] rounded-none font-mono text-[11px] border-border bg-muted/40 dark:bg-black/40 px-2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-none border-border font-mono text-xs">

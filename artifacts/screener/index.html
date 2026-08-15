@@ -21,6 +21,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Apply the saved theme before first paint to avoid a light-mode flash.
+      // Must match the storage key and default ("dark") in src/hooks/use-theme.ts.
+      (function () {
+        try {
+          var theme = localStorage.getItem("screener:theme");
+          document.documentElement.classList.toggle("dark", theme !== "light");
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

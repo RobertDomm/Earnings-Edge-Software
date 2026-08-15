@@ -10,6 +10,7 @@ import Dashboard from '@/pages/dashboard';
 import AccessRestricted from '@/pages/access-restricted';
 import CustomSignInPage from '@/pages/custom-sign-in';
 import { useTheme } from '@/hooks/use-theme';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 import {
   Route,
@@ -154,11 +155,12 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
-  useTheme(); // Enforces dark mode
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <WouterRouter base={basePath}>
       <ClerkProviderWithRoutes />
+      <ThemeToggle theme={theme} onToggle={toggleTheme} />
     </WouterRouter>
   );
 }
