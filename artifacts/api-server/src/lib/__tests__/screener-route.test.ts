@@ -30,6 +30,13 @@ import type {
 } from "../market-data.js";
 import { MOCK_STOCKS } from "../market-data.js";
 
+// Stocks that pass Filter 1 (sector exclusion) — these are the only ones the
+// route should return now that sector-excluded stocks are dropped server-side.
+const EXCLUDED_SECTORS = new Set(["oil", "biotech", "healthcare", "defense"]);
+const SECTOR_ELIGIBLE_STOCKS = MOCK_STOCKS.filter(
+  (s) => !EXCLUDED_SECTORS.has(s.sector ?? "other")
+);
+
 // ---------------------------------------------------------------------------
 // Minimal stub provider factory
 // ---------------------------------------------------------------------------
@@ -300,7 +307,7 @@ describe("GET /screener — provider returns full universe", () => {
     );
   });
 
-  it("body.results is an array with one entry per stock", async () => {
+  it("body.results excludes sector-gated stocks (oil, biotech, healthcare, defense)", async () => {
     const res = await fetch(`${ts.url}/api/screener`);
     const body = (await res.json()) as Record<string, unknown>;
 
@@ -310,19 +317,19 @@ describe("GET /screener — provider returns full universe", () => {
     );
     assert.equal(
       (body["results"] as unknown[]).length,
-      MOCK_STOCKS.length,
-      `body.results must have ${MOCK_STOCKS.length} entries (one per stock)`,
+      SECTOR_ELIGIBLE_STOCKS.length,
+      `body.results must have ${SECTOR_ELIGIBLE_STOCKS.length} entries (sector-eligible stocks only, not all ${MOCK_STOCKS.length})`,
     );
   });
 
-  it("body.totalScanned equals MOCK_STOCKS.length", async () => {
+  it("body.totalScanned reflects sector-eligible stocks only", async () => {
     const res = await fetch(`${ts.url}/api/screener`);
     const body = (await res.json()) as Record<string, unknown>;
 
     assert.equal(
       body["totalScanned"],
-      MOCK_STOCKS.length,
-      `body.totalScanned must equal ${MOCK_STOCKS.length}`,
+      SECTOR_ELIGIBLE_STOCKS.length,
+      `body.totalScanned must equal ${SECTOR_ELIGIBLE_STOCKS.length} (sector-eligible only, not all ${MOCK_STOCKS.length})`,
     );
   });
 

@@ -42,6 +42,38 @@ import { db, pool, scannerResultsTable } from "@workspace/db";
 // The single row that holds the latest scan result uses id=1.
 const RESULT_ROW_ID = 1;
 
+/**
+ * Strip sector-excluded stocks (Filter 1 failures) from a raw DB stocks
+ * array, and recompute the derived counts so all values stay consistent.
+ *
+ * This runs on every read path (GET /scanner/results and the immediate
+ * POST /scanner/run response) so that pre-deployment data cannot leak
+ * sector-excluded stocks after the server is updated.
+ */
+function sanitizeStoredStocks(rawStocks: unknown[]): {
+  stocks: unknown[];
+  totalScanned: number;
+  totalQualified: number;
+  totalQualifiedWithCaveats: number;
+} {
+  // Keep only results where the first filter (Filter 1, sector exclusion) passed.
+  const stocks = rawStocks.filter((r) => {
+    if (r === null || typeof r !== "object") return true; // keep unexpected shapes
+    const results = (r as Record<string, unknown>)["filterResults"];
+    if (!Array.isArray(results) || results.length === 0) return true;
+    const f1 = results[0] as Record<string, unknown> | undefined;
+    return f1?.["passed"] !== false;
+  });
+  const totalScanned = stocks.length;
+  const totalQualified = stocks.filter((r) =>
+    (r as Record<string, unknown>)["qualified"] === true
+  ).length;
+  const totalQualifiedWithCaveats = stocks.filter((r) =>
+    (r as Record<string, unknown>)["qualifiedWithCaveats"] === true
+  ).length;
+  return { stocks, totalScanned, totalQualified, totalQualifiedWithCaveats };
+}
+
 // Scans should complete in seconds. 10 minutes is a generous upper bound;
 // any "running" row older than this is treated as an abandoned lease.
 const LEASE_WINDOW_MINUTES = 10;
@@ -181,16 +213,21 @@ export function createScannerRouter(
     const now = new Date().toISOString();
     res.json(
       existing && existing.scanTime
-        ? {
-            stocks: existing.stocks,
-            totalScanned: existing.totalScanned,
-            totalQualified: existing.totalQualified,
-            totalQualifiedWithCaveats: existing.totalQualifiedWithCaveats,
-            scanTime: existing.scanTime,
-            dataAsOf: existing.dataAsOf,
-            dataFreshness: existing.dataFreshness,
-            status: "running",
-          }
+        ? (() => {
+            const sanitized = sanitizeStoredStocks(
+              Array.isArray(existing.stocks) ? existing.stocks : []
+            );
+            return {
+              stocks: sanitized.stocks,
+              totalScanned: sanitized.totalScanned,
+              totalQualified: sanitized.totalQualified,
+              totalQualifiedWithCaveats: sanitized.totalQualifiedWithCaveats,
+              scanTime: existing.scanTime,
+              dataAsOf: existing.dataAsOf,
+              dataFreshness: existing.dataFreshness,
+              status: "running",
+            };
+          })()
         : {
             stocks: [],
             totalScanned: 0,
@@ -208,7 +245,10 @@ export function createScannerRouter(
     void (async () => {
       try {
         const { stocks, dataFreshness } = await marketProvider.getStockUniverse();
-        const results = engine.runScreening(stocks);
+        const allResults = engine.runScreening(stocks);
+        // Drop stocks that fail Filter 1 (sector exclusion) — they can never
+        // qualify and should not appear anywhere in the app.
+        const results = allResults.filter((r) => r.filterResults[0]?.passed !== false);
 
         await finalizeScan(runId, "complete", {
           stocks: results,
@@ -252,14 +292,17 @@ export function createScannerRouter(
       return;
     }
 
+    const sanitized = sanitizeStoredStocks(
+      Array.isArray(row.stocks) ? row.stocks : []
+    );
     res.json({
       hasResults: true,
       status: row.status as ScanStatus,
       lastScan: {
-        stocks: row.stocks,
-        totalScanned: row.totalScanned,
-        totalQualified: row.totalQualified,
-        totalQualifiedWithCaveats: row.totalQualifiedWithCaveats,
+        stocks: sanitized.stocks,
+        totalScanned: sanitized.totalScanned,
+        totalQualified: sanitized.totalQualified,
+        totalQualifiedWithCaveats: sanitized.totalQualifiedWithCaveats,
         scanTime: row.scanTime,
         dataAsOf: row.dataAsOf,
         dataFreshness: row.dataFreshness,

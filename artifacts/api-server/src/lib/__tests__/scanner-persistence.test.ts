@@ -352,6 +352,110 @@ describe("Scanner result persistence across fresh router instances", () => {
     }
   });
 
+  // ── Sector exclusion on read paths ────────────────────────────────────────
+
+  it("GET /scanner/results strips pre-existing sector-excluded stocks (Filter 1 failures) from stored results", async () => {
+    // Simulate a scan result persisted before the sector-filter deployment —
+    // it contains one eligible stock and one oil-sector stock that should
+    // now be hidden on every read.
+    const stocksWithExcluded = [
+      {
+        symbol: "AAPL",
+        qualified: true,
+        qualifiedWithCaveats: false,
+        filterResults: [{ name: "Filter 1", passed: true }, { name: "Filter 2", passed: true }],
+      },
+      {
+        symbol: "XOM",
+        qualified: false,
+        qualifiedWithCaveats: false,
+        filterResults: [{ name: "Filter 1", passed: false }, { name: "Filter 2", passed: false }],
+      },
+    ];
+
+    await writeResult({
+      stocks: stocksWithExcluded,
+      totalScanned: 2,
+      totalQualified: 1,
+      totalQualifiedWithCaveats: 0,
+      scanTime: SCAN_TIME_A,
+      dataAsOf: DATA_AS_OF_A,
+      dataFreshness: FRESHNESS_A,
+      status: "complete",
+    });
+
+    const instance = await startServer();
+    try {
+      const res = await fetch(`${instance.url}/api/scanner/results`);
+      assert.equal(res.status, 200);
+
+      const body = (await res.json()) as Record<string, unknown>;
+      const lastScan = body["lastScan"] as Record<string, unknown>;
+      assert.ok(lastScan, "lastScan must be present");
+
+      const stocks = lastScan["stocks"] as Array<Record<string, unknown>>;
+      assert.equal(stocks.length, 1, "XOM (Filter 1 failure) must be stripped — only AAPL remains");
+      assert.equal(stocks[0]?.["symbol"], "AAPL", "remaining stock must be AAPL");
+
+      assert.equal(lastScan["totalScanned"], 1, "totalScanned must be recomputed to 1 after stripping XOM");
+      assert.equal(lastScan["totalQualified"], 1, "totalQualified must still be 1");
+    } finally {
+      await stopServer(instance.server);
+    }
+  });
+
+  it("POST /scanner/run immediate response strips pre-existing sector-excluded stocks", async () => {
+    // Write a pre-deployment result containing a healthcare-sector stock.
+    const stocksWithExcluded = [
+      {
+        symbol: "MSFT",
+        qualified: false,
+        qualifiedWithCaveats: false,
+        filterResults: [{ name: "Filter 1", passed: true }, { name: "Filter 2", passed: false }],
+      },
+      {
+        symbol: "UNH",
+        qualified: false,
+        qualifiedWithCaveats: false,
+        filterResults: [{ name: "Filter 1", passed: false }],
+      },
+    ];
+
+    await writeResult({
+      stocks: stocksWithExcluded,
+      totalScanned: 2,
+      totalQualified: 0,
+      totalQualifiedWithCaveats: 0,
+      scanTime: SCAN_TIME_A,
+      dataAsOf: DATA_AS_OF_A,
+      dataFreshness: FRESHNESS_A,
+      status: "complete",
+    });
+
+    const instance = await startServer();
+    try {
+      // POST /scanner/run immediately returns the previous result while
+      // starting a background scan. That stale result must also be filtered.
+      const res = await fetch(`${instance.url}/api/scanner/run`, { method: "POST" });
+      assert.equal(res.status, 200);
+
+      const body = (await res.json()) as Record<string, unknown>;
+      const stocks = body["stocks"] as Array<Record<string, unknown>>;
+
+      assert.ok(Array.isArray(stocks), "stocks must be an array in the immediate response");
+      const symbols = stocks.map((s) => s["symbol"]);
+      assert.ok(!symbols.includes("UNH"), "UNH (Filter 1 failure) must be stripped from the immediate response");
+      assert.ok(symbols.includes("MSFT"), "MSFT (Filter 1 pass) must remain in the immediate response");
+
+      assert.equal(
+        body["totalScanned"], 1,
+        `totalScanned in immediate response must be recomputed to 1 (got ${body["totalScanned"]})`
+      );
+    } finally {
+      await stopServer(instance.server);
+    }
+  });
+
   // ── No results yet ─────────────────────────────────────────────────────────
 
   it("GET /scanner/results on a fresh router returns hasResults=false when no scan has run", async () => {

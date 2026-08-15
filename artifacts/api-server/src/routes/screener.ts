@@ -64,11 +64,14 @@ export function createScreenerRouter(
         return;
       }
 
-      const results = screeningEngine.runScreening(stocks);
+      const allResults = screeningEngine.runScreening(stocks);
+      // Drop stocks that fail Filter 1 (sector exclusion) — they can never
+      // qualify and should not appear anywhere in the app.
+      const results = allResults.filter((r) => r.filterResults[0]?.passed !== false);
 
       res.json({
         results,
-        totalScanned: stocks.length,
+        totalScanned: results.length,
         totalQualified: results.filter((r) => r.qualified).length,
         dataFreshness,
       });
