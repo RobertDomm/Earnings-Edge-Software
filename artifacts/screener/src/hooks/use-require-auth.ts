@@ -24,7 +24,13 @@ export function useRequireAuth() {
   });
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded) {
+      // On the Replit dev domain, Clerk rejects the live key so isLoaded never
+      // becomes true.  Mirror the same 5-second fallback used by the Root page
+      // so the user isn't left on a protected route with an infinite spinner.
+      const timeout = setTimeout(() => setLocation("/sign-in"), 5000);
+      return () => clearTimeout(timeout);
+    }
 
     // Clerk reports session is gone — send to sign-in immediately.
     if (!isSignedIn) {
@@ -47,6 +53,7 @@ export function useRequireAuth() {
     if (!authStatus.authorized) {
       setLocation("/access-restricted");
     }
+    return;
   }, [isLoaded, isSignedIn, authStatus, setLocation]);
 
   const email =
