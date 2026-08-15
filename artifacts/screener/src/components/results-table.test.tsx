@@ -142,9 +142,14 @@ describe("ResultsTable delta badge", () => {
   });
 });
 
-// ── Setup column (Filter 6 trade details) ─────────────────────────────────────
+// ── Filter 6 cell tooltip (trade details exposed via title attribute) ──────────
+//
+// Filter results are rendered as pass/fail/bypass icons; full details
+// (name, calculatedValue, threshold, explanation) appear in the cell's
+// `title` attribute so the trader can hover to inspect. The component does
+// not render a separate "Setup" column — all detail lives in the tooltip.
 
-describe("ResultsTable Setup column", () => {
+describe("ResultsTable Filter 6 tooltip", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -158,7 +163,7 @@ describe("ResultsTable Setup column", () => {
     vi.useRealTimers();
   });
 
-  it("shows strikes and peak P&Ls when a stock is fully qualified and Filter 6 passed", () => {
+  it("renders a pass icon and exposes Filter 6 details in the cell tooltip when fully qualified", () => {
     const stock: StockResult = {
       ...makeStock(200),
       qualified: true,
@@ -168,41 +173,46 @@ describe("ResultsTable Setup column", () => {
 
     render(buildTree([stock], 0.001, queryClient));
 
-    // Strike display: "207.5c / 172.5p" (rendered as two separate nodes)
-    expect(screen.getByText(/207\.5c/)).toBeTruthy();
-    expect(screen.getByText(/172\.5p/)).toBeTruthy();
-
-    // P&L display: "+$1.24 / +$0.98"
-    expect(screen.getByText(/\+\$1\.24/)).toBeTruthy();
-    expect(screen.getByText(/\+\$0\.98/)).toBeTruthy();
+    // The filter cell carries a title attribute containing the explanation.
+    // calculatedValue "+$1.24 call  /  +$0.98 put" and explanation with
+    // strike info appear there — not as visible text nodes.
+    const cells = document.querySelectorAll("td[title]");
+    const f6Cell = Array.from(cells).find((el) =>
+      el.getAttribute("title")?.includes("Filter 6"),
+    );
+    expect(f6Cell).not.toBeNull();
+    expect(f6Cell?.getAttribute("title")).toContain("+$1.24");
+    expect(f6Cell?.getAttribute("title")).toContain(FILTER_6_PASS.explanation);
   });
 
-  it("shows a dash instead of setup data when the stock is not overall-qualified, even if Filter 6 passed", () => {
+  it("no filter details appear as visible text — only icons are rendered", () => {
     const stock: StockResult = {
       ...makeStock(200),
-      qualified: false,
-      status: "not_qualified",
+      qualified: true,
+      status: "qualified",
       filterResults: [FILTER_6_PASS],
     };
 
     render(buildTree([stock], 0.001, queryClient));
 
-    // No strikes or P&Ls should appear
+    // Strike and P&L details must NOT be visible text — they live in tooltips.
     expect(screen.queryByText(/207\.5c/)).toBeNull();
     expect(screen.queryByText(/172\.5p/)).toBeNull();
     expect(screen.queryByText(/\+\$1\.24/)).toBeNull();
   });
 
-  it("shows a dash when the stock is qualified but has no Filter 6 result", () => {
+  it("shows a pass icon when the filter passed (CheckCircle2 svg present)", () => {
     const stock: StockResult = {
       ...makeStock(200),
       qualified: true,
       status: "qualified",
-      filterResults: [], // no Filter 6 entry
+      filterResults: [FILTER_6_PASS],
     };
 
     render(buildTree([stock], 0.001, queryClient));
 
-    expect(screen.queryByText(/\d+c\s*\/\s*\d+p/)).toBeNull();
+    // lucide-react renders pass icons with class containing "check-circle"
+    const passIcon = document.querySelector(".lucide-circle-check, .lucide-check-circle-2, [class*='check-circle']");
+    expect(passIcon).not.toBeNull();
   });
 });
