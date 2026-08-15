@@ -51,7 +51,7 @@ export default function AccessRestricted() {
             <p className="text-xs text-muted-foreground font-mono">
               SIGNED IN AS: {email}
             </p>
-            <p className="text-xs text-red-400 font-mono mt-1">
+            <p className="text-xs text-red-600 dark:text-red-400 font-mono mt-1">
               STATUS: NOT A REQUIRED SPACE GROUP MEMBER
             </p>
           </div>

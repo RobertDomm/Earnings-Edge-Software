@@ -47,7 +47,7 @@ function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
           A runtime exception occurred in the rendering pipeline.
         </p>
         {import.meta.env.DEV ? (
-          <pre className="mt-6 overflow-x-auto border border-border/50 bg-muted/40 dark:bg-black/40 p-4 text-left text-xs font-mono text-red-400">
+          <pre className="mt-6 overflow-x-auto border border-border/50 bg-muted/40 dark:bg-black/40 p-4 text-left text-xs font-mono text-red-600 dark:text-red-400">
             {error.message || String(error)}
           </pre>
         ) : null}

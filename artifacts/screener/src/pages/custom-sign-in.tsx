@@ -315,8 +315,8 @@ export default function CustomSignInPage() {
           Please use your Circle email to verify your authorization
         </p>
 
-        <div className="bg-white rounded-xl shadow-lg p-8 w-full">
-          <h1 className="text-xl font-bold text-center text-gray-900 mb-6 leading-snug">
+        <div className="bg-card rounded-xl shadow-lg p-8 w-full border border-border">
+          <h1 className="text-xl font-bold text-center text-card-foreground mb-6 leading-snug">
             Welcome to
             <br />
             The Earnings Edge Software
@@ -332,23 +332,23 @@ export default function CustomSignInPage() {
                 required
                 disabled={loading}
                 autoFocus
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:opacity-50 text-sm"
+                className="w-full px-3 py-2 border border-input rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50 text-sm bg-background"
               />
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
               <button
                 type="submit"
                 disabled={loading || !email.trim() || !clerkReady}
-                className="w-full bg-gray-900 text-white py-2 rounded-md font-medium text-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                className="w-full bg-primary text-primary-foreground py-2 rounded-md font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
               >
                 {loading ? 'Checking…' : <>Continue &rarr;</>}
               </button>
             </form>
           ) : (
             <form onSubmit={handleCodeSubmit} className="flex flex-col gap-4">
-              <p className="text-sm text-gray-600 text-center">
+              <p className="text-sm text-muted-foreground text-center">
                 We sent a 6-digit code to
                 <br />
-                <span className="font-semibold text-gray-900">{email}</span>
+                <span className="font-semibold text-foreground">{email}</span>
               </p>
               <input
                 type="text"
@@ -362,13 +362,13 @@ export default function CustomSignInPage() {
                 autoFocus
                 inputMode="numeric"
                 maxLength={6}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:opacity-50"
+                className="w-full px-3 py-2 border border-input rounded-md text-foreground placeholder:text-muted-foreground text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50 bg-background"
               />
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
               <button
                 type="submit"
                 disabled={loading || code.length < 6}
-                className="w-full bg-gray-900 text-white py-2 rounded-md font-medium text-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-primary text-primary-foreground py-2 rounded-md font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Verifying…' : 'Verify →'}
               </button>
@@ -381,10 +381,10 @@ export default function CustomSignInPage() {
                   disabled={resendCooldown > 0 || resendStatus === 'sending'}
                   className={
                     resendStatus === 'sent'
-                      ? 'text-green-600 cursor-default'
+                      ? 'text-emerald-700 dark:text-emerald-400 cursor-default'
                       : resendCooldown > 0 || resendStatus === 'sending'
-                        ? 'text-gray-300 cursor-not-allowed'
-                        : 'text-gray-500 hover:text-gray-700 underline'
+                        ? 'text-muted-foreground/40 cursor-not-allowed'
+                        : 'text-muted-foreground hover:text-foreground underline'
                   }
                 >
                   {resendLabel}
@@ -402,7 +402,7 @@ export default function CustomSignInPage() {
                     }
                     setResendCooldown(0);
                   }}
-                  className="text-gray-400 hover:text-gray-600 underline"
+                  className="text-muted-foreground/60 hover:text-muted-foreground underline"
                 >
                   Use a different email
                 </button>
@@ -410,7 +410,7 @@ export default function CustomSignInPage() {
             </form>
           )}
 
-          <p className="text-center text-xs text-gray-400 mt-6">
+          <p className="text-center text-xs text-muted-foreground mt-6">
             Secured by <span className="font-medium">Clerk</span>
           </p>
         </div>

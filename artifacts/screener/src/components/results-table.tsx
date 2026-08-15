@@ -34,8 +34,8 @@ export function EarningsSourceBadge({
       }
       className={`inline-flex items-center font-mono text-[9px] uppercase tracking-wider px-1 py-0 border leading-tight ${
         confirmed
-          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-500"
-          : "border-amber-400/40 bg-amber-400/10 text-amber-400"
+          ? "border-emerald-600/40 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-400"
+          : "border-amber-600/40 bg-amber-50 text-amber-700 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-400"
       }`}
     >
       {confirmed ? "Confirmed" : "Est."}
@@ -252,9 +252,9 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                       <TableCell
                         className={`font-mono text-right px-3 py-2.5 ${
                           stock.dailyChangePercent > 0
-                            ? "text-emerald-500"
+                            ? "text-emerald-700 dark:text-emerald-500"
                             : stock.dailyChangePercent < 0
-                            ? "text-red-500"
+                            ? "text-red-600 dark:text-red-500"
                             : ""
                         }`}
                       >
@@ -287,9 +287,9 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                             title={tooltip}
                           >
                             {passed ? (
-                              <CheckCircle2 className="h-4 w-4 text-emerald-500 mx-auto" />
+                              <CheckCircle2 className="h-4 w-4 text-emerald-700 dark:text-emerald-500 mx-auto" />
                             ) : (
-                              <XCircle className="h-4 w-4 text-red-500/70 mx-auto" />
+                              <XCircle className="h-4 w-4 text-red-700 dark:text-red-500/70 mx-auto" />
                             )}
                           </TableCell>
                         );

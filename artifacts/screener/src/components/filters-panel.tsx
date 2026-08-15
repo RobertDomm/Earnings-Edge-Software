@@ -82,10 +82,10 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
                     className={[
                       "text-[10px] font-mono leading-tight mt-0.5",
                       allPassed
-                        ? "text-emerald-500"
+                        ? "text-emerald-700 dark:text-emerald-500"
                         : passed === 0
-                        ? "text-red-500/70"
-                        : "text-amber-400/80",
+                        ? "text-red-700 dark:text-red-500/70"
+                        : "text-amber-600 dark:text-amber-400",
                     ].join(" ")}
                   >
                     {`${passed}/${total} passed`}

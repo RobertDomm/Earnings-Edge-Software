@@ -127,7 +127,7 @@ export function ScannerStatusWidget({
       <div className="absolute top-0 left-0 w-1 h-full bg-primary/50" />
 
       {isServingCachedData && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-amber-950/60 border-b border-amber-600/40 text-amber-400">
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-400/60 text-amber-700 dark:bg-amber-950/60 dark:border-amber-600/40 dark:text-amber-400">
           <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
           <span className="text-[11px] font-mono uppercase tracking-wider">
             Market data API unreachable — showing cached data
@@ -171,7 +171,7 @@ export function ScannerStatusWidget({
               {isAutoActive && (
                 <Badge
                   variant="default"
-                  className="font-mono text-[10px] tracking-wider rounded-none px-1.5 py-0 flex items-center gap-1 bg-cyan-500/15 text-cyan-400 border-transparent"
+                  className="font-mono text-[10px] tracking-wider rounded-none px-1.5 py-0 flex items-center gap-1 bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400 border-transparent"
                 >
                   <Zap className="h-2.5 w-2.5" />
                   AUTO {intervalSeconds}s
@@ -200,7 +200,7 @@ export function ScannerStatusWidget({
                   </span>
                   <span>
                     Passed:{" "}
-                    <span className="text-emerald-500">
+                    <span className="text-emerald-700 dark:text-emerald-500">
                       {formatCompactNumber(
                         scannerState.lastScan.totalQualified
                       )}
@@ -222,7 +222,7 @@ export function ScannerStatusWidget({
               <>
                 <span className="text-foreground/80">
                   Updated{" "}
-                  <span className="text-cyan-400 font-semibold">
+                  <span className="text-cyan-600 dark:text-cyan-400 font-semibold">
                     {lastUpdatedAgo}
                   </span>
                 </span>
