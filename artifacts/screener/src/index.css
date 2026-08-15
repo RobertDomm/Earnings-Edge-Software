@@ -75,27 +75,29 @@
 }
 
 :root {
+  /* High-contrast light theme: black text and lines on white.
+     --primary stays blue (tickers, scanner button). */
   --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
+  --foreground: 0 0% 0%;
   --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --card-border: 240 5.9% 90%;
+  --card-foreground: 0 0% 0%;
+  --card-border: 0 0% 0%;
   --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --popover-border: 240 5.9% 90%;
+  --popover-foreground: 0 0% 0%;
+  --popover-border: 0 0% 0%;
   --primary: 210 100% 50%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 240 5.9% 10%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 0%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 20%;
+  --accent: 0 0% 94%;
+  --accent-foreground: 0 0% 0%;
+  --destructive: 0 84.2% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 0%;
+  --input: 0 0% 0%;
+  --ring: 0 0% 0%;
 }
 
 .dark {
