@@ -71,7 +71,7 @@ export interface ScreeningResult {
    * "qualified"     — all 6 filters passed.
    * "not_qualified" — at least one filter failed.
    */
-  status: "qualified" | "qualified_with_caveats" | "not_qualified";
+  status: "qualified" | "not_qualified";
 }
 
 export interface IFilterRule {

@@ -206,16 +206,6 @@ export function ScannerStatusWidget({
                       )}
                     </span>
                   </span>
-                  {scannerState.lastScan.totalQualifiedWithCaveats > 0 && (
-                    <span title="Stocks where all filters passed or were bypassed — manual review recommended before entry">
-                      Review:{" "}
-                      <span className="text-amber-400">
-                        {formatCompactNumber(
-                          scannerState.lastScan.totalQualifiedWithCaveats
-                        )}
-                      </span>
-                    </span>
-                  )}
                 </>
               ) : (
                 <span>No scan history — run scanner to begin</span>

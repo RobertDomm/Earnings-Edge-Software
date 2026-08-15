@@ -18,8 +18,8 @@ interface Filter6Data {
 }
 
 function getFilter6Data(stock: StockResult): Filter6Data | null {
-  // Show trade setup for stocks that either fully qualified or qualified with caveats
-  if (!stock.qualified && !stock.qualifiedWithCaveats) return null;
+  // Show trade setup only for stocks that fully qualified
+  if (!stock.qualified) return null;
   const f6 = stock.filterResults.find((fr) => fr.name.startsWith("Filter 6"));
   if (!f6 || !f6.passed) return null;
 
@@ -256,16 +256,16 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                           <div className="flex justify-between items-center mb-2">
                             <div className="flex items-center gap-3">
                               <Badge
-                                variant={fr.passed ? "success" : fr.bypassed ? "warning" : "danger"}
+                                variant={fr.passed ? "success" : "danger"}
                                 className="font-mono text-[10px] uppercase tracking-wider rounded-none px-1.5 py-0"
                               >
-                                {fr.passed ? "PASS" : fr.bypassed ? "REVIEW" : "FAIL"}
+                                {fr.passed ? "PASS" : "FAIL"}
                               </Badge>
                               <h4 className="font-mono text-sm font-semibold">{fr.name}</h4>
                             </div>
                             <div className="text-right font-mono text-xs">
                               <span className="text-muted-foreground mr-2">Target: {fr.threshold}</span>
-                              <span className={fr.passed ? "text-emerald-500" : fr.bypassed ? "text-amber-400" : "text-red-500"}>Value: {fr.calculatedValue}</span>
+                              <span className={fr.passed ? "text-emerald-500" : "text-red-500"}>Value: {fr.calculatedValue}</span>
                             </div>
                           </div>
                           <div className="text-xs text-muted-foreground flex items-start gap-2 mt-3 bg-muted/10 p-2 border-l-2 border-border/50">
