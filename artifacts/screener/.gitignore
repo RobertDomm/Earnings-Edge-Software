@@ -1,0 +1,3 @@
+# Compiled libgbm stub — rebuilt automatically by scripts/prepare-e2e.sh
+# The source (libgbm_stub.c) is committed; the binary is not.
+e2e-libs/libgbm.so.1
