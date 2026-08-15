@@ -669,9 +669,17 @@ export const LIVE_STOCK_UNIVERSE: string[] = [
   // Semiconductors
   "AMD", "INTC", "QCOM", "AVGO", "MU", "AMAT", "LRCX", "KLAC", "TSM",
   // Enterprise tech / hardware
-  "SNOW", "HPE", "DELL",
+  "SNOW", "HPE", "DELL", "ORCL", "CRM", "ADBE", "NOW", "IBM", "CSCO", "TXN",
+  // Semis / AI hardware
+  "MRVL", "ON", "ARM", "SMCI",
+  // Software / cybersecurity
+  "PANW", "CRWD", "ZS", "NET", "DDOG", "MDB", "TEAM", "WDAY",
+  // Media / internet
+  "NFLX", "DIS", "SHOP", "ROKU", "PINS", "TTD", "ABNB", "DASH", "DKNG",
   // Finance
   "JPM", "BAC", "GS", "MS", "C", "WFC", "BLK", "SCHW",
+  // Payments / fintech
+  "V", "MA", "AXP", "PYPL", "SOFI", "AFRM",
   // Healthcare
   "UNH", "LLY", "JNJ", "ABBV", "MRK", "PFE", "AMGN",
   // Consumer / Retail
@@ -708,6 +716,40 @@ const TICKER_NAMES: Record<string, string> = {
   SNOW: "Snowflake Inc.",
   HPE: "Hewlett Packard Enterprise Company",
   DELL: "Dell Technologies Inc.",
+  ORCL: "Oracle Corporation",
+  CRM: "Salesforce, Inc.",
+  ADBE: "Adobe Inc.",
+  NOW: "ServiceNow, Inc.",
+  IBM: "International Business Machines Corporation",
+  CSCO: "Cisco Systems, Inc.",
+  TXN: "Texas Instruments Incorporated",
+  MRVL: "Marvell Technology, Inc.",
+  ON: "ON Semiconductor Corporation",
+  ARM: "Arm Holdings plc",
+  SMCI: "Super Micro Computer, Inc.",
+  PANW: "Palo Alto Networks, Inc.",
+  CRWD: "CrowdStrike Holdings, Inc.",
+  ZS: "Zscaler, Inc.",
+  NET: "Cloudflare, Inc.",
+  DDOG: "Datadog, Inc.",
+  MDB: "MongoDB, Inc.",
+  TEAM: "Atlassian Corporation",
+  WDAY: "Workday, Inc.",
+  NFLX: "Netflix, Inc.",
+  DIS: "The Walt Disney Company",
+  SHOP: "Shopify Inc.",
+  ROKU: "Roku, Inc.",
+  PINS: "Pinterest, Inc.",
+  TTD: "The Trade Desk, Inc.",
+  ABNB: "Airbnb, Inc.",
+  DASH: "DoorDash, Inc.",
+  DKNG: "DraftKings Inc.",
+  V: "Visa Inc.",
+  MA: "Mastercard Incorporated",
+  AXP: "American Express Company",
+  PYPL: "PayPal Holdings, Inc.",
+  SOFI: "SoFi Technologies, Inc.",
+  AFRM: "Affirm Holdings, Inc.",
   JPM: "JPMorgan Chase & Co.",
   BAC: "Bank of America Corporation",
   GS: "Goldman Sachs Group, Inc.",
@@ -783,6 +825,16 @@ export const TICKER_SECTORS: Record<string, string> = {
   AMAT: "tech", LRCX: "tech", KLAC: "tech", TSM: "tech",
   // Enterprise tech / hardware
   SNOW: "tech", HPE: "tech", DELL: "tech",
+  ORCL: "tech", CRM: "tech", ADBE: "tech", NOW: "tech", IBM: "tech",
+  CSCO: "tech", TXN: "tech", MRVL: "tech", ON: "tech", ARM: "tech",
+  SMCI: "tech", PANW: "tech", CRWD: "tech", ZS: "tech", NET: "tech",
+  DDOG: "tech", MDB: "tech", TEAM: "tech", WDAY: "tech",
+  // Media / internet
+  NFLX: "tech", DIS: "consumer", SHOP: "tech", ROKU: "tech", PINS: "tech",
+  TTD: "tech", ABNB: "consumer", DASH: "consumer", DKNG: "consumer",
+  // Payments / fintech
+  V: "finance", MA: "finance", AXP: "finance", PYPL: "finance",
+  SOFI: "finance", AFRM: "finance",
   // Finance
   JPM: "finance", BAC: "finance", GS: "finance", MS: "finance",
   C: "finance", WFC: "finance", BLK: "finance", SCHW: "finance",
@@ -3468,7 +3520,7 @@ export function createMarketDataProvider(): IMarketDataProvider {
     // Default 5 req/min = Polygon free tier.  Raise POLYGON_REQUESTS_PER_MINUTE
     // for paid plans (Starter supports ~100+).  Set to 0 for unlimited (tests only).
     // Default: 100 req/min — appropriate for Polygon Starter plan.
-    // Free tier (5 RPM) cannot complete a 75-symbol universe in a useful time;
+    // Free tier (5 RPM) cannot complete a ~93-symbol universe in a useful time;
     // set POLYGON_REQUESTS_PER_MINUTE=5 explicitly to opt into the slow path.
     const rpm = parseInt(process.env.POLYGON_REQUESTS_PER_MINUTE ?? "100", 10);
     const cacheTtl = parseInt(process.env.UNIVERSE_CACHE_TTL_SECONDS ?? "300", 10);
