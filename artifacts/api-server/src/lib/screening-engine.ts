@@ -300,18 +300,17 @@ const filter3: IFilterRule = {
 // earnings events. A single cycle where IV failed to expand means the stock
 // does not reliably exhibit the pattern and should be skipped.
 //
-// IV values are real option implied volatilities from ThetaData's historical
-// end-of-day greeks (near-ATM average per day). Providers without a
-// historical IV source supply null history and the filter bypasses — there
-// is no realized-vol proxy fallback.
+// In the live provider, "IV" is approximated by annualized close-to-close
+// realized volatility computed from Polygon stock aggregates — the best proxy
+// available without historical options IV data.
 // ---------------------------------------------------------------------------
 
 const REQUIRED_IV_CYCLES = 4;
 
 const filter4: IFilterRule = {
   name: "Filter 4 — IV Rise into Earnings",
-  description: "Checks that near-ATM option implied volatility (from ThetaData historical end-of-day greeks) rose into earnings in each of the last 4 quarterly cycles — evidence of a consistent pre-earnings IV run-up.",
-  defaultThreshold: `${REQUIRED_IV_CYCLES}/${REQUIRED_IV_CYCLES} cycles show IV expansion`,
+  description: "Checks that realized volatility (used as a proxy for IV, computed from Polygon stock aggregates) rose into earnings in each of the last 4 quarterly cycles — evidence of a consistent pre-earnings volatility run-up.",
+  defaultThreshold: `${REQUIRED_IV_CYCLES}/${REQUIRED_IV_CYCLES} cycles show RV expansion`,
   evaluate(stock) {
     const history = stock.earningsIvHistory;
 

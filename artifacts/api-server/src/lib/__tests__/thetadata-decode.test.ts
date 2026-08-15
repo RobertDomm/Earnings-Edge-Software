@@ -327,103 +327,8 @@ import {
   fetchPolygonUpcomingEventsCached,
   clearPolygonEventsCache,
   ThetaDataProvider,
-  monthlyExpirationAfter,
-  computeDailyAtmIv,
-  buildEarningsIvRecord,
-  dateOffsetFrom,
 } from "../market-data.js";
 import type { StockQuote } from "../market-data.js";
-
-// ---------------------------------------------------------------------------
-// Pure helpers for the ThetaData historical implied-vol pipeline (Filter 4)
-// ---------------------------------------------------------------------------
-
-describe("monthlyExpirationAfter — third-Friday monthly expiration", () => {
-  it("returns the same month's third Friday when the date precedes it", () => {
-    // Third Friday of Aug 2026 is 2026-08-21
-    assert.equal(monthlyExpirationAfter("2026-08-03"), "2026-08-21");
-  });
-
-  it("rolls to next month when the date is on/after the third Friday", () => {
-    assert.equal(monthlyExpirationAfter("2026-08-21"), "2026-09-18");
-    assert.equal(monthlyExpirationAfter("2026-08-28"), "2026-09-18");
-  });
-
-  it("handles year rollover", () => {
-    // Third Friday of Dec 2026 is 2026-12-18; after it → Jan 2027 (2027-01-15)
-    assert.equal(monthlyExpirationAfter("2026-12-20"), "2027-01-15");
-  });
-});
-
-describe("computeDailyAtmIv — near-ATM daily IV from EOD greeks rows", () => {
-  const DAY1 = new Date("2026-07-01T00:00:00Z").getTime();
-  const row = (ts: number, strike: number, iv: number, underlying = 100) => ({
-    timestamp: ts, strike, implied_vol: iv, underlying_price: underlying,
-  });
-
-  it("averages the 3 strikes nearest the underlying per day", () => {
-    const rows = [
-      row(DAY1, 100, 0.30), // nearest
-      row(DAY1, 105, 0.32),
-      row(DAY1, 95,  0.28),
-      row(DAY1, 150, 0.90), // far OTM — excluded from top-3
-    ];
-    const daily = computeDailyAtmIv(rows);
-    assert.equal(daily.size, 1);
-    assert.ok(Math.abs(daily.get("2026-07-01")! - 0.30) < 1e-9);
-  });
-
-  it("skips rows with degenerate or failed IV solves", () => {
-    const rows = [
-      row(DAY1, 100, 0),      // failed solve
-      row(DAY1, 105, 7.5),    // degenerate
-      row(DAY1, 95,  0.001),  // degenerate
-    ];
-    assert.equal(computeDailyAtmIv(rows).size, 0);
-  });
-
-  it("groups rows by trading day", () => {
-    const DAY2 = DAY1 + 86_400_000;
-    const daily = computeDailyAtmIv([row(DAY1, 100, 0.30), row(DAY2, 100, 0.40)]);
-    assert.equal(daily.get("2026-07-01"), 0.30);
-    assert.equal(daily.get("2026-07-02"), 0.40);
-  });
-});
-
-describe("buildEarningsIvRecord — baseline vs pre-earnings IV windows", () => {
-  const EARNINGS = "2026-07-30";
-
-  function seriesWith(preIv: number, baseIv: number): Map<string, number> {
-    const m = new Map<string, number>();
-    for (const d of [2, 3, 4]) m.set(dateOffsetFrom(EARNINGS, -d), preIv);
-    for (const d of [15, 20, 30]) m.set(dateOffsetFrom(EARNINGS, -d), baseIv);
-    return m;
-  }
-
-  it("ivRose=true when pre-earnings IV exceeds baseline", () => {
-    const rec = buildEarningsIvRecord(EARNINGS, seriesWith(0.45, 0.30));
-    assert.ok(rec);
-    assert.equal(rec!.earningsDate, EARNINGS);
-    assert.equal(rec!.ivBeforeEarnings, 0.45);
-    assert.equal(rec!.ivBaseline, 0.30);
-    assert.equal(rec!.ivRose, true);
-  });
-
-  it("ivRose=false when IV did not expand into earnings", () => {
-    const rec = buildEarningsIvRecord(EARNINGS, seriesWith(0.25, 0.30));
-    assert.equal(rec!.ivRose, false);
-  });
-
-  it("returns null when either window has fewer than 2 usable days", () => {
-    const onlyPre = new Map<string, number>([
-      [dateOffsetFrom(EARNINGS, -2), 0.4],
-      [dateOffsetFrom(EARNINGS, -3), 0.4],
-      [dateOffsetFrom(EARNINGS, -20), 0.3], // 1 baseline day only
-    ]);
-    assert.equal(buildEarningsIvRecord(EARNINGS, onlyPre), null);
-    assert.equal(buildEarningsIvRecord(EARNINGS, new Map()), null);
-  });
-});
 
 function makeThetaDataStock(overrides: Partial<StockQuote> = {}): StockQuote {
   return {
@@ -555,8 +460,7 @@ describe("ThetaData pipeline: qualified_with_caveats when only earnings data is 
 //
 // Verifies that when both THETADATA_API_KEY and MARKET_DATA_API_KEY are
 // active, the Polygon supplementary call correctly populates
-// nextEarningsDate and historicalEarningsDates (the anchor dates the
-// ThetaData provider fetches real implied-vol history for).
+// nextEarningsDate and earningsIvHistory (non-null).
 // ---------------------------------------------------------------------------
 
 /**
@@ -674,44 +578,61 @@ describe("fetchPolygonEarningsData — stub Polygon HTTP (both API keys active)"
     }
   });
 
-  it("returns the 4 filing dates as historicalEarningsDates (most recent first)", async () => {
+  it("returns non-null earningsIvHistory with 4 records when price aggregates cover all windows", async () => {
     installStubFetch();
     try {
       const result = await fetchPolygonEarningsData("stub-key", "META");
-      assert.deepEqual(
-        result.historicalEarningsDates,
-        STUB_FILINGS.map((f) => f.filing_date),
-        "historicalEarningsDates must be the 4 Polygon filing dates, most recent first"
+      assert.ok(
+        result.earningsIvHistory !== null,
+        "earningsIvHistory must be non-null when 4 filings and covering price bars are provided"
       );
-    } finally {
-      restoreFetch();
-    }
-  });
-
-  it("does not touch the price-aggregates endpoint (no realized-vol computation remains)", async () => {
-    originalFetch = globalThis.fetch;
-    const aggsUrls: string[] = [];
-    globalThis.fetch = (async (input: unknown) => {
-      const url = input instanceof URL ? input.href : String(input);
-      if (url.includes("/v2/aggs/")) aggsUrls.push(url);
-      if (url.includes("/vX/reference/financials")) {
-        return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
-      }
-      return makeJsonResponse({ results: [], status: "OK" });
-    }) as typeof globalThis.fetch;
-    try {
-      await fetchPolygonEarningsData("stub-key", "META");
       assert.equal(
-        aggsUrls.length,
-        0,
-        `fetchPolygonEarningsData must not call /v2/aggs — realized-vol proxy was removed (got: ${aggsUrls.join(", ")})`
+        result.earningsIvHistory!.length,
+        4,
+        `earningsIvHistory must contain 4 records (one per filing) — got ${result.earningsIvHistory!.length}`
       );
     } finally {
       restoreFetch();
     }
   });
 
-  it("returns null nextEarningsDate and null historicalEarningsDates when Polygon financials call fails", async () => {
+  it("each EarningsIvRecord has numeric ivBeforeEarnings, ivBaseline, and boolean ivRose", async () => {
+    installStubFetch();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      for (const rec of result.earningsIvHistory ?? []) {
+        assert.ok(
+          typeof rec.ivBeforeEarnings === "number" && rec.ivBeforeEarnings > 0,
+          `ivBeforeEarnings must be a positive number (got ${rec.ivBeforeEarnings})`
+        );
+        assert.ok(
+          typeof rec.ivBaseline === "number" && rec.ivBaseline > 0,
+          `ivBaseline must be a positive number (got ${rec.ivBaseline})`
+        );
+        assert.equal(typeof rec.ivRose, "boolean", "ivRose must be boolean");
+      }
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("ivBeforeEarnings > ivBaseline for all 4 cycles (high pre-earnings vol confirmed)", async () => {
+    installStubFetch();
+    try {
+      const result = await fetchPolygonEarningsData("stub-key", "META");
+      for (const rec of result.earningsIvHistory ?? []) {
+        assert.ok(
+          rec.ivBeforeEarnings > rec.ivBaseline,
+          `Expected ivBeforeEarnings (${rec.ivBeforeEarnings}) > ivBaseline (${rec.ivBaseline}) for ${rec.earningsDate}`
+        );
+        assert.equal(rec.ivRose, true, `ivRose must be true when ivBeforeEarnings > ivBaseline (${rec.earningsDate})`);
+      }
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("returns null nextEarningsDate and null earningsIvHistory when Polygon financials call fails", async () => {
     installStubFetch();
     // Override: financials returns HTTP 500
     const failFinancials: typeof globalThis.fetch = async (input) => {
@@ -719,13 +640,13 @@ describe("fetchPolygonEarningsData — stub Polygon HTTP (both API keys active)"
       if (url.includes("/vX/reference/financials")) {
         return makeJsonResponse({ error: "internal error" }, 500);
       }
-      return makeJsonResponse({ results: [] }, 200);
+      return makeJsonResponse({ results: STUB_BARS }, 200);
     };
     globalThis.fetch = failFinancials;
     try {
       const result = await fetchPolygonEarningsData("stub-key", "META");
       assert.equal(result.nextEarningsDate, null, "nextEarningsDate must be null when financials call fails");
-      assert.equal(result.historicalEarningsDates, null, "historicalEarningsDates must be null when financials call fails");
+      assert.equal(result.earningsIvHistory, null, "earningsIvHistory must be null when financials call fails");
     } finally {
       restoreFetch();
     }
@@ -758,18 +679,27 @@ describe("fetchPolygonEarningsData — ADR fallback via historical earnings date
     }) as typeof globalThis.fetch;
   }
 
-  it("returns the injected historical earnings dates when Polygon has no filings", async () => {
+  it("builds a 4-record IV history from injected historical earnings dates when Polygon has no filings", async () => {
     installAdrStub();
     try {
       const result = await fetchPolygonEarningsData("stub-key", "BABA", {
         retryBaseMs: 1,
         historicalEarningsDatesFetcher: async () => ADR_DATES,
       });
-      assert.deepEqual(
-        result.historicalEarningsDates,
-        ADR_DATES,
-        "anchor dates must come from the historical-dates fallback when Polygon has no filings",
+      assert.ok(
+        result.earningsIvHistory !== null,
+        "earningsIvHistory must be non-null when the historical-dates fallback supplies 4 past dates",
       );
+      assert.equal(result.earningsIvHistory!.length, 4);
+      assert.deepEqual(
+        result.earningsIvHistory!.map((r) => r.earningsDate),
+        ADR_DATES,
+        "records must be built from the fallback dates",
+      );
+      for (const rec of result.earningsIvHistory!) {
+        assert.equal(typeof rec.ivRose, "boolean");
+        assert.ok(rec.ivBeforeEarnings > 0 && rec.ivBaseline > 0);
+      }
       // With no filings, the +91-day estimate is derived from the latest reported date.
       assert.equal(result.nextEarningsDate, "2026-08-12", "nextEarningsDate must be latest reported date + 91 days");
     } finally {
@@ -777,14 +707,14 @@ describe("fetchPolygonEarningsData — ADR fallback via historical earnings date
     }
   });
 
-  it("returns null anchor dates when the fallback supplies fewer than 4 past dates", async () => {
+  it("returns null IV history when the fallback supplies fewer than 4 past dates", async () => {
     installAdrStub();
     try {
       const result = await fetchPolygonEarningsData("stub-key", "NIO", {
         retryBaseMs: 1,
         historicalEarningsDatesFetcher: async () => ADR_DATES.slice(0, 3),
       });
-      assert.equal(result.historicalEarningsDates, null);
+      assert.equal(result.earningsIvHistory, null);
       assert.equal(result.nextEarningsDate, null);
     } finally {
       globalThis.fetch = originalFetch;
@@ -796,6 +726,7 @@ describe("fetchPolygonEarningsData — ADR fallback via historical earnings date
     globalThis.fetch = (async (input: unknown) => {
       const url = input instanceof URL ? input.href : String(input);
       if (url.includes("/vX/reference/financials")) return makeJsonResponse({ results: STUB_FILINGS, status: "OK" });
+      if (url.includes("/v2/aggs/ticker/")) return makeJsonResponse({ results: STUB_BARS, status: "OK" });
       return makeJsonResponse({ error: "stub: unrecognised path" }, 404);
     }) as typeof globalThis.fetch;
     let fallbackCalls = 0;
@@ -805,10 +736,11 @@ describe("fetchPolygonEarningsData — ADR fallback via historical earnings date
         historicalEarningsDatesFetcher: async () => { fallbackCalls++; return ADR_DATES; },
       });
       assert.equal(fallbackCalls, 0, "fallback must not run when Polygon supplies 4 filings");
+      assert.equal(result.earningsIvHistory!.length, 4);
       assert.deepEqual(
-        result.historicalEarningsDates,
+        result.earningsIvHistory!.map((r) => r.earningsDate),
         STUB_FILINGS.map((f) => f.filing_date),
-        "anchor dates must come from Polygon filings, not the fallback",
+        "records must come from Polygon filings, not the fallback",
       );
     } finally {
       globalThis.fetch = originalFetch;

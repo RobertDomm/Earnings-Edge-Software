@@ -92,9 +92,6 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] font-mono text-muted-foreground opacity-60 leading-tight">
-                  {f.description}
-                </p>
                 {hasCount && (
                   <p
                     className={[
