@@ -188,6 +188,14 @@ export interface OptionsLiquidityMetrics {
    * Null when data is insufficient. Used by Filter 6.
    */
   putCalendarPeak: number | null;
+  /**
+   * Per-expiration median near-ATM implied volatility for expirations up to
+   * ~35 DTE, ordered by DTE ascending. Used by Filter 5 to verify the IV term
+   * structure hump: the expiration covering earnings must carry higher IV than
+   * both the expiration the week before and the week after it.
+   * Null when greek/IV data is unavailable.
+   */
+  ivTermStructure: Array<{ expiration: string; dte: number; iv: number }> | null;
 }
 
 export interface StockUniverseResult {
@@ -227,7 +235,12 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-08-26", // 14 days → PASS F2 (window: 14–18d)
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451, shortCallStrike: 207.5, shortPutStrike: 172.5, callCalendarPeak: 1.24, putCalendarPeak: 0.98 },
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.17, nearTermDte: 11, nearTermIv: 0.451, shortCallStrike: 207.5, shortPutStrike: 172.5, callCalendarPeak: 1.24, putCalendarPeak: 0.98, ivTermStructure: [
+      // FIXED_TODAY=2026-08-12; earnings "2026-08-26" (DTE=14); first exp >= earnings: "2026-08-28" (DTE=16)
+      { expiration: "2026-08-21", dte: 9,  iv: 0.3624 }, // prev week
+      { expiration: "2026-08-28", dte: 16, iv: 0.5817 }, // earnings exp — IV hump peak
+      { expiration: "2026-09-04", dte: 23, iv: 0.3952 }, // following week
+    ] },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.276, ivBeforeEarnings: 0.418, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.312, ivBeforeEarnings: 0.467, ivRose: true },
@@ -250,7 +263,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-09-05", // 24 days → FAIL F2
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3 (spread)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.62, nearTermDte: 9, nearTermIv: 0.548, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null }, // FAIL F3 (spread)
     earningsIvHistory: [ // 4/4 rise (solid pattern but fails F2+F3)
       { earningsDate: "2025-08-09", ivBaseline: 0.512, ivBeforeEarnings: 0.781, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.548, ivBeforeEarnings: 0.824, ivRose: true },
@@ -273,7 +286,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-09-10", // 29 days → FAIL F2
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214, shortCallStrike: 452.5, shortPutStrike: 377.5, callCalendarPeak: 2.87, putCalendarPeak: 2.41 }, // FAIL F2 (earnings 29d away)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 11, nearTermIv: 0.214, shortCallStrike: 452.5, shortPutStrike: 377.5, callCalendarPeak: 2.87, putCalendarPeak: 2.41, ivTermStructure: null }, // FAIL F2 (earnings 29d away)
     earningsIvHistory: [ // 4/4 rise (would qualify if earnings were in window)
       { earningsDate: "2025-08-09", ivBaseline: 0.198, ivBeforeEarnings: 0.281, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.214, ivBeforeEarnings: 0.306, ivRose: true },
@@ -296,7 +309,12 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-08-27", // 15 days → PASS F2 (but fails F4)
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948, shortCallStrike: 272.5, shortPutStrike: 225.0, callCalendarPeak: 3.82, putCalendarPeak: 3.14 }, // FAIL F4
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.27, nearTermDte: 12, nearTermIv: 0.948, shortCallStrike: 272.5, shortPutStrike: 225.0, callCalendarPeak: 3.82, putCalendarPeak: 3.14, ivTermStructure: [
+      // FIXED_TODAY=2026-08-12; earnings "2026-08-27" (DTE=15); first exp >= earnings: "2026-08-28" (DTE=16)
+      { expiration: "2026-08-21", dte: 9,  iv: 0.7012 }, // prev week
+      { expiration: "2026-08-28", dte: 16, iv: 1.1243 }, // earnings exp — IV hump peak (TSLA high-vol)
+      { expiration: "2026-09-04", dte: 23, iv: 0.8156 }, // following week
+    ] }, // FAIL F4
     earningsIvHistory: [ // 3/4 rise → FAIL F4 (IV dropped one cycle)
       { earningsDate: "2025-08-09", ivBaseline: 0.724, ivBeforeEarnings: 0.981, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.681, ivBeforeEarnings: 0.823, ivRose: true },
@@ -319,7 +337,13 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-08-29", // 17 days → PASS F2
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521, shortCallStrike: 560.0, shortPutStrike: 467.5, callCalendarPeak: 3.42, putCalendarPeak: 2.91 },
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.31, nearTermDte: 10, nearTermIv: 0.521, shortCallStrike: 560.0, shortPutStrike: 467.5, callCalendarPeak: 3.42, putCalendarPeak: 2.91, ivTermStructure: [
+      { expiration: "2026-08-21", dte: 6,  iv: 0.3841 },
+      { expiration: "2026-08-28", dte: 13, iv: 0.5123 },
+      { expiration: "2026-09-04", dte: 20, iv: 0.7248 }, // first exp >= earnings date 2026-08-29 — HUMP
+      { expiration: "2026-09-11", dte: 27, iv: 0.4217 },
+      { expiration: "2026-09-18", dte: 34, iv: 0.3654 },
+    ] },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.342, ivBeforeEarnings: 0.524, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.378, ivBeforeEarnings: 0.563, ivRose: true },
@@ -342,7 +366,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-08-14", // 2 days → FAIL F2 (too close — window opens at 14d)
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281, shortCallStrike: 210.0, shortPutStrike: 177.5, callCalendarPeak: 1.48, putCalendarPeak: 1.22 }, // FAIL F2 (earnings 2d away)
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.24, nearTermDte: 9, nearTermIv: 0.281, shortCallStrike: 210.0, shortPutStrike: 177.5, callCalendarPeak: 1.48, putCalendarPeak: 1.22, ivTermStructure: null }, // FAIL F2 (earnings 2d away)
     earningsIvHistory: null, // earnings outside window; skip for mock clarity
   },
   {
@@ -360,7 +384,12 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847, shortCallStrike: 185.0, shortPutStrike: 152.5, callCalendarPeak: 2.31, putCalendarPeak: 1.87 },
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.22, nearTermDte: 12, nearTermIv: 0.847, shortCallStrike: 185.0, shortPutStrike: 152.5, callCalendarPeak: 2.31, putCalendarPeak: 1.87, ivTermStructure: [
+      // FIXED_TODAY=2026-08-12; earnings "2026-08-28" (DTE=16); first exp >= earnings: "2026-08-28" (DTE=16)
+      { expiration: "2026-08-21", dte: 9,  iv: 0.5631 }, // prev week
+      { expiration: "2026-08-28", dte: 16, iv: 0.9148 }, // earnings exp — IV hump peak
+      { expiration: "2026-09-04", dte: 23, iv: 0.6724 }, // following week
+    ] },
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.581, ivBeforeEarnings: 0.842, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.623, ivBeforeEarnings: 0.908, ivRose: true },
@@ -382,7 +411,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     sector: "etf",
     nextEarningsDate: null, // ETF — no earnings → FAIL F2
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.05, nearTermDte: 7, nearTermIv: 0.145, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // ETF — no calendar structure
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.05, nearTermDte: 7, nearTermIv: 0.145, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null }, // ETF — no calendar structure
     earningsIvHistory: null, // ETF — no earnings cycle
   },
   {
@@ -400,7 +429,12 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-08-28", // 16 days → PASS F2
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419, shortCallStrike: 197.5, shortPutStrike: 162.5, callCalendarPeak: -0.43, putCalendarPeak: 1.18 }, // FAIL F6 — call peak below zero
+    liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: 0.19, nearTermDte: 14, nearTermIv: 0.419, shortCallStrike: 197.5, shortPutStrike: 162.5, callCalendarPeak: -0.43, putCalendarPeak: 1.18, ivTermStructure: [
+      // FIXED_TODAY=2026-08-12; earnings "2026-08-28" (DTE=16); first exp >= earnings: "2026-08-28" (DTE=16)
+      { expiration: "2026-08-21", dte: 9,  iv: 0.3118 }, // prev week
+      { expiration: "2026-08-28", dte: 16, iv: 0.5024 }, // earnings exp — IV hump peak
+      { expiration: "2026-09-04", dte: 23, iv: 0.3487 }, // following week
+    ] }, // FAIL F6 — call peak below zero
     earningsIvHistory: [ // 4/4 rise → PASS F4
       { earningsDate: "2025-08-09", ivBaseline: 0.271, ivBeforeEarnings: 0.413, ivRose: true },
       { earningsDate: "2025-11-07", ivBaseline: 0.303, ivBeforeEarnings: 0.447, ivRose: true },
@@ -423,7 +457,7 @@ export const MOCK_STOCKS: StockQuote[] = [
     nextEarningsDate: "2026-09-01", // 20 days → FAIL F2
     earningsDateSource: "confirmed",
     upcomingEvents: [],
-    liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null }, // FAIL F3
+    liquidityMetrics: { hasWeeklyOptions: false, hasPennyIncrements: false, nearTermSpread: 0.45, nearTermDte: 14, nearTermIv: null, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null }, // FAIL F3
     earningsIvHistory: null,
   },
   // --- Sector-excluded demo stocks (fail Filter 1 in mock mode) ---
@@ -1831,6 +1865,42 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
       }
     }
 
+    // Per-expiration IV for term structure hump (Filter 5)
+    // Near-ATM filter: restrict to |delta| in [0.25, 0.75] so deep-ITM/OTM
+    // IV skew cannot create or erase the earnings hump.
+    // Free-tier Polygon plans report Greeks as exactly 0 (not undefined/null)
+    // for every contract. Treating delta=0 as "absent" activates the fallback
+    // that includes all valid-IV contracts, matching the behaviour for plans
+    // without Greeks at all.
+    const ivByExp = new Map<string, number[]>();
+    for (const [expiry, contracts] of byExpiry) {
+      const dte = Math.round((new Date(expiry + "T00:00:00").getTime() - todayMs) / 86_400_000);
+      if (dte < 0 || dte > 35) continue;
+      for (const r of contracts) {
+        const iv = safeNum(r.implied_volatility);
+        if (iv <= 0) continue;
+        const delta = r.greeks?.delta;
+        // Apply near-ATM gate only when delta is a non-zero real value.
+        // delta === 0 exactly → free-tier stub → fall through to include all.
+        if (delta !== undefined && delta !== null && delta !== 0) {
+          const absDelta = Math.abs(delta);
+          if (absDelta < 0.25 || absDelta > 0.75) continue; // skip deep ITM/OTM
+        }
+        if (!ivByExp.has(expiry)) ivByExp.set(expiry, []);
+        ivByExp.get(expiry)!.push(iv);
+      }
+    }
+    const ivTermStructure: Array<{ expiration: string; dte: number; iv: number }> | null =
+      ivByExp.size >= 2
+        ? [...ivByExp.entries()]
+            .map(([exp, ivs]) => ({
+              expiration: exp,
+              dte: Math.round((new Date(exp + "T00:00:00").getTime() - todayMs) / 86_400_000),
+              iv: parseFloat(median(ivs).toFixed(4)),
+            }))
+            .sort((a, b) => a.dte - b.dte)
+        : null;
+
     // --- Filter 6: Double calendar structure ---
     // Find the longer-term expiry closest to 18 DTE (in the 14–22 DTE range).
     let longerTermExpiry: string | null = null;
@@ -1928,6 +1998,7 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
       liquidityMetrics: {
         hasWeeklyOptions, hasPennyIncrements, nearTermSpread, nearTermDte, nearTermIv,
         shortCallStrike, shortPutStrike, callCalendarPeak, putCalendarPeak,
+        ivTermStructure,
       },
     };
   }
@@ -2842,6 +2913,37 @@ export class ThetaDataProvider implements IMarketDataProvider {
       if (longExp && exp === longExp) greekMapLong.set(key, { iv });
     }
 
+    // ---- Per-expiration IV for term structure hump (Filter 5) ----
+    // greekRows already cover all expirations up to 35 DTE (fetched via maxDte=35).
+    // Near-ATM filter: restrict to |Delta| in [0.25, 0.75] so deep-ITM/OTM IV skew
+    // cannot create or erase the earnings hump. ThetaData normally supplies real
+    // Greek values; delta=0 exactly is treated as absent (tdGetNum fallback when the
+    // column is missing) and triggers the include-all fallback path.
+    const ivByExp = new Map<string, number[]>();
+    for (const row of greekRows) {
+      const exp = tdGetStr(row, "Expiration", "expiration");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
+      const dte = dteFn(exp);
+      if (dte < 0 || dte > 35) continue;
+      const iv = tdGetNum(row, "implied_vol", "MidIV", "mid_iv", "IV", "iv", "ImpliedVolatility", "implied_volatility");
+      if (iv <= 0) continue;
+      const delta = tdGetNum(row, "Delta", "delta");
+      // Apply near-ATM gate only when delta is a non-zero real value.
+      // delta=0 exactly → column absent or free-tier stub → include all valid-IV rows.
+      if (delta !== 0) {
+        const absDelta = Math.abs(delta);
+        if (absDelta < 0.25 || absDelta > 0.75) continue; // skip deep ITM/OTM
+      }
+      if (!ivByExp.has(exp)) ivByExp.set(exp, []);
+      ivByExp.get(exp)!.push(iv);
+    }
+    const ivTermStructure: Array<{ expiration: string; dte: number; iv: number }> | null =
+      ivByExp.size >= 2
+        ? [...ivByExp.entries()]
+            .map(([exp, ivs]) => ({ expiration: exp, dte: dteFn(exp), iv: parseFloat(median(ivs).toFixed(4)) }))
+            .sort((a, b) => a.dte - b.dte)
+        : null;
+
     // ---- Aggregate implied volatility ----
     const ivValues: number[] = [];
     for (const [, g] of greekMapNear) if (g.iv > 0) ivValues.push(g.iv);
@@ -2965,6 +3067,7 @@ export class ThetaDataProvider implements IMarketDataProvider {
         shortPutStrike,
         callCalendarPeak,
         putCalendarPeak,
+        ivTermStructure,
       },
     };
   }

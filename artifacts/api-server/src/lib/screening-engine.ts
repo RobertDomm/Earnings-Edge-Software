@@ -145,6 +145,17 @@ const filter1: IFilterRule = {
   },
 };
 
+/**
+ * Human-readable suffix indicating whether the stock's earnings date is a
+ * confirmed calendar date or a +91-day estimate. Empty when the provider
+ * predates the earningsDateSource field.
+ */
+function earningsSourceLabel(stock: { earningsDateSource?: "confirmed" | "estimated" | null }): string {
+  if (stock.earningsDateSource === "confirmed") return ", confirmed";
+  if (stock.earningsDateSource === "estimated") return ", estimated";
+  return "";
+}
+
 // ---------------------------------------------------------------------------
 // Filter 2 — Earnings in 2 Weeks (14–18 days out)
 //
@@ -370,47 +381,58 @@ const filter4: IFilterRule = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter 5 — Earnings Is the Only Upcoming Event (final gate)
+// Filter 5 — IV Term Structure Confirms Earnings Event (final gate)
 //
-// Two checks before sign-off:
-//   1. Re-confirm earnings still fall in the 14–18 day window (Filter 2 made
-//      the initial cut).
-//   2. Verify earnings is the ONLY known upcoming catalyst — no ex-dividend
-//      date or stock split lands between today and the earnings date. The
-//      strategy's edge depends on the pre-earnings IV run-up being purely
-//      earnings-driven, so a rival event disqualifies the stock.
-// If event data is unavailable, the event check is bypassed (not silently
-// passed), matching the null-data convention of Filters 2 and 4.
+// Two sequential checks before sign-off:
+//
+// Part A — Confirmed earnings window:
+//   The earnings date must be (a) explicitly confirmed — from a real earnings
+//   calendar, not the +91-day estimate — and (b) still in the 14–18 day entry
+//   window. An estimated date bypasses the filter; we cannot be sure the window
+//   is valid. An out-of-window confirmed date is a genuine failure.
+//
+// Part B — IV term structure hump:
+//   The options market must show an IV "tent" centered on the earnings week:
+//     iv[earnings expiration] > iv[prev expiration]
+//     iv[earnings expiration] > iv[next expiration]
+//   The "earnings expiration" is the first weekly expiration on or after the
+//   earnings date. This confirms the market is specifically pricing in the
+//   upcoming earnings event. If term structure data is unavailable or lacks
+//   the required adjacent expirations, the hump check is bypassed.
+//
+// The old rival-events (dividend/split) sub-check has been removed. The IV
+// hump is the market-based signal that replaces it.
 // ---------------------------------------------------------------------------
 
-const FILTER5_THRESHOLD = `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out; no dividend/split before earnings`;
-
-/**
- * Human-readable suffix indicating whether the stock's earnings date is a
- * confirmed calendar date or a +91-day estimate. Empty when the provider
- * predates the earningsDateSource field.
- */
-function earningsSourceLabel(stock: { earningsDateSource?: "confirmed" | "estimated" | null }): string {
-  if (stock.earningsDateSource === "confirmed") return ", confirmed";
-  if (stock.earningsDateSource === "estimated") return ", estimated";
-  return "";
-}
+const FILTER5_THRESHOLD = `Confirmed earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out; earnings-week IV > adjacent expirations`;
 
 const filter5: IFilterRule = {
-  name: "Filter 5 — Earnings Is the Only Upcoming Event",
+  name: "Filter 5 — IV Term Structure Confirms Earnings Event",
   description:
-    "Final sign-off: re-confirms earnings fall in the 14–18 day window AND that earnings is the only known upcoming event — no ex-dividend date or stock split lands before earnings to muddy the pre-earnings IV run-up.",
+    "Final sign-off: re-confirms earnings fall in the 14–18 day window (confirmed dates only), then verifies the options market is pricing in the specific earnings event by requiring the expiration covering earnings to carry higher implied volatility than both the week before and the week after (IV term structure hump).",
   defaultThreshold: FILTER5_THRESHOLD,
   evaluate(stock, today?: Date) {
+    // --- Part A: confirmed-only gate ---
+
     if (!stock.nextEarningsDate) {
-      // No earnings date from the data provider — mark as bypassed, matching Filter 2 behaviour.
       return {
         name: this.name,
         passed: false,
         bypassed: true,
-        calculatedValue: "No earnings date",
+        calculatedValue: "No confirmed earnings date",
         threshold: FILTER5_THRESHOLD,
-        explanation: `Earnings date unavailable for ${stock.symbol} from the current data provider — filter bypassed. Verify the earnings window and event calendar manually before entry.`,
+        explanation: `Earnings date unavailable for ${stock.symbol} — filter bypassed. Verify the earnings window and IV term structure manually before entry.`,
+      };
+    }
+
+    if (stock.earningsDateSource !== "confirmed") {
+      return {
+        name: this.name,
+        passed: false,
+        bypassed: true,
+        calculatedValue: `Estimated date: ${stock.nextEarningsDate}`,
+        threshold: FILTER5_THRESHOLD,
+        explanation: `${stock.symbol}'s earnings date (${stock.nextEarningsDate}) is estimated, not confirmed. Cannot reliably verify the entry window — filter bypassed.`,
       };
     }
 
@@ -421,7 +443,6 @@ const filter5: IFilterRule = {
       (earningsDate.getTime() - _today.getTime()) / 86_400_000
     );
     const inWindow = daysUntil >= EARNINGS_WINDOW_MIN && daysUntil <= EARNINGS_WINDOW_MAX;
-    const sourceLabel = earningsSourceLabel(stock);
 
     if (!inWindow) {
       return {
@@ -431,50 +452,68 @@ const filter5: IFilterRule = {
         calculatedValue:
           daysUntil < 0
             ? `${Math.abs(daysUntil)}d ago`
-            : `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel})`,
+            : `${daysUntil}d (${stock.nextEarningsDate}, confirmed)`,
         threshold: FILTER5_THRESHOLD,
         explanation:
           daysUntil < 0
-            ? `${stock.symbol}'s most recent earnings were ${Math.abs(daysUntil)} days ago. Waiting for next cycle.`
+            ? `${stock.symbol}'s most recent confirmed earnings were ${Math.abs(daysUntil)} days ago. Waiting for next cycle.`
             : daysUntil < EARNINGS_WINDOW_MIN
-            ? `${stock.symbol} reports in ${daysUntil} days — window has closed. Too late to enter.`
-            : `${stock.symbol} reports in ${daysUntil} days — not yet in the entry window.`,
+            ? `${stock.symbol} reports in ${daysUntil} days (confirmed) — window has closed. Too late to enter.`
+            : `${stock.symbol} reports in ${daysUntil} days (confirmed) — not yet in the entry window.`,
       };
     }
 
-    // --- Earnings window confirmed. Now: is earnings the ONLY upcoming event? ---
-    const events = stock.upcomingEvents;
+    // --- Part B: IV term structure hump ---
 
-    if (events == null) {
-      // Event data unavailable — bypass the event check rather than silently passing.
+    const termStructure = stock.liquidityMetrics?.ivTermStructure ?? null;
+
+    if (!termStructure || termStructure.length < 3) {
       return {
         name: this.name,
         passed: false,
         bypassed: true,
-        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel}) — event data unavailable`,
+        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — IV term structure unavailable`,
         threshold: FILTER5_THRESHOLD,
-        explanation: `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}${sourceLabel}) — in the entry window — but the upcoming-events check could not run (event data unavailable). Verify manually that no dividend or split lands before earnings.`,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but IV term structure data is unavailable or insufficient. Verify the IV hump manually before entry.`,
       };
     }
 
-    // Conflicting events: any dividend/split dated from today (inclusive —
-    // an event landing today still muddies the run-up window) through the
-    // earnings date competes with earnings as a catalyst.
+    // Find the earnings expiration: the first expiration on or after the earnings date.
     const earningsDateStr = stock.nextEarningsDate;
-    const todayStr = `${_today.getFullYear()}-${String(_today.getMonth() + 1).padStart(2, "0")}-${String(_today.getDate()).padStart(2, "0")}`;
-    const conflicts = events.filter((e) => e.date >= todayStr && e.date <= earningsDateStr);
+    const earningsExpIdx = termStructure.findIndex((e) => e.expiration >= earningsDateStr);
 
-    if (conflicts.length > 0) {
-      const detail = conflicts
-        .map((e) => `${e.type === "dividend" ? "ex-dividend date" : "stock split"} on ${e.date}`)
-        .join(", ");
+    if (earningsExpIdx === -1 || earningsExpIdx === 0 || earningsExpIdx === termStructure.length - 1) {
+      return {
+        name: this.name,
+        passed: false,
+        bypassed: true,
+        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — insufficient adjacent expirations`,
+        threshold: FILTER5_THRESHOLD,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but the IV term structure lacks adjacent expirations around the earnings week to confirm a hump. Verify manually.`,
+      };
+    }
+
+    const prevExp     = termStructure[earningsExpIdx - 1]!;
+    const earningsExp = termStructure[earningsExpIdx]!;
+    const nextExp     = termStructure[earningsExpIdx + 1]!;
+
+    const humpConfirmed = earningsExp.iv > prevExp.iv && earningsExp.iv > nextExp.iv;
+
+    const ivSummary =
+      `earnings exp ${earningsExp.expiration} IV=${(earningsExp.iv * 100).toFixed(1)}%` +
+      ` vs prev ${(prevExp.iv * 100).toFixed(1)}% / next ${(nextExp.iv * 100).toFixed(1)}%`;
+
+    if (!humpConfirmed) {
       return {
         name: this.name,
         passed: false,
         bypassed: false,
-        calculatedValue: `${conflicts.length} conflicting event(s)`,
+        calculatedValue: `No IV hump: ${ivSummary}`,
         threshold: FILTER5_THRESHOLD,
-        explanation: `${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}), but earnings is not the only upcoming event: ${detail}. A rival catalyst muddies the pure earnings IV run-up — disqualified.`,
+        explanation:
+          `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but the options market is NOT pricing in a specific earnings event. ` +
+          `The earnings-week expiration (${earningsExp.expiration}) does not show an IV peak vs adjacent weeks (${ivSummary}). ` +
+          `The pre-earnings run-up may already be underway or priced in differently.`,
       };
     }
 
@@ -482,9 +521,12 @@ const filter5: IFilterRule = {
       name: this.name,
       passed: true,
       bypassed: false,
-      calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}${sourceLabel}) — no rival events`,
+      calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — IV hump confirmed`,
       threshold: FILTER5_THRESHOLD,
-      explanation: `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}${sourceLabel}) — in the 2-week entry window, and earnings is the only known upcoming event (no dividends or splits before earnings).`,
+      explanation:
+        `✔ Confirmed: ${stock.symbol} reports in ${daysUntil} days (${stock.nextEarningsDate}, confirmed) — ` +
+        `in the 2-week entry window — and the options market shows a clear IV term structure hump at the ` +
+        `earnings-week expiration (${ivSummary}), confirming the market is specifically pricing in this earnings event.`,
     };
   },
 };

@@ -431,4 +431,92 @@ describe("LiveMarketDataProvider universe cache", () => {
       );
     }
   });
+
+  // ---------------------------------------------------------------------------
+  // Free-tier Polygon delta=0 fallback — ivTermStructure must still be built
+  // ---------------------------------------------------------------------------
+  // Free-tier Polygon plans report greeks.delta as exactly 0 for every contract
+  // rather than omitting the greeks object. The near-ATM filter must treat
+  // delta=0 as "unavailable" and fall back to including all valid-IV contracts
+  // so that ivTermStructure is populated and the Filter 5 hump check can run.
+  it("ivTermStructure is populated even when all Polygon contracts have greeks.delta=0 (free-tier chain)", async () => {
+    const originalFetch = globalThis.fetch;
+
+    // Build a short-term options chain spanning 3 expirations within 35 DTE.
+    // All contracts have delta=0 exactly — simulating a free-tier Polygon plan.
+    // IV is arranged so exp2 is the highest (a term structure hump at exp2).
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const addDays = (d: Date, n: number) => {
+      const r = new Date(d);
+      r.setDate(r.getDate() + n);
+      return r.toISOString().split("T")[0]!;
+    };
+    const exp1 = addDays(today, 9);   // DTE=9
+    const exp2 = addDays(today, 16);  // DTE=16 — hump
+    const exp3 = addDays(today, 23);  // DTE=23
+
+    const freeTierChain = [
+      // exp1 — low IV
+      { implied_volatility: 0.32, open_interest: 1000, day: { volume: 100 }, details: { contract_type: "call", strike_price: 100, expiration_date: exp1 }, last_quote: { bid: 1.0, ask: 1.1 }, greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
+      { implied_volatility: 0.34, open_interest: 900,  day: { volume: 90  }, details: { contract_type: "put",  strike_price: 100, expiration_date: exp1 }, last_quote: { bid: 0.9, ask: 1.0 }, greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
+      // exp2 — high IV (hump)
+      { implied_volatility: 0.58, open_interest: 1200, day: { volume: 120 }, details: { contract_type: "call", strike_price: 100, expiration_date: exp2 }, last_quote: { bid: 2.0, ask: 2.2 }, greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
+      { implied_volatility: 0.60, open_interest: 1100, day: { volume: 110 }, details: { contract_type: "put",  strike_price: 100, expiration_date: exp2 }, last_quote: { bid: 1.9, ask: 2.1 }, greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
+      // exp3 — low IV
+      { implied_volatility: 0.38, open_interest: 800,  day: { volume: 80  }, details: { contract_type: "call", strike_price: 100, expiration_date: exp3 }, last_quote: { bid: 1.2, ask: 1.3 }, greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
+      { implied_volatility: 0.40, open_interest: 750,  day: { volume: 75  }, details: { contract_type: "put",  strike_price: 100, expiration_date: exp3 }, last_quote: { bid: 1.1, ask: 1.2 }, greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 } },
+    ];
+
+    try {
+      globalThis.fetch = async (input: string | URL | Request): Promise<Response> => {
+        const url = input instanceof Request ? input.url : input.toString();
+        if (url.includes("/v2/snapshot/locale/us/markets/stocks/tickers?")) {
+          return makeJsonResponse({ tickers: [{ ticker: "AAPL", lastTrade: { p: 100 }, todaysChangePerc: 0.5, day: { v: 20_000_000, c: 100 }, prevDay: { v: 19_000_000, c: 99 } }], status: "OK" });
+        }
+        if (url.includes("/v3/snapshot/options/")) {
+          return makeJsonResponse({ results: freeTierChain, status: "OK" });
+        }
+        if (url.includes("/v2/aggs/ticker/")) {
+          return makeJsonResponse({ results: Array.from({ length: 30 }, (_, i) => ({ v: 20_000_000, c: 100, t: Date.now() - (30 - i) * 86_400_000 })), status: "OK" });
+        }
+        if (url.includes("/v1/marketstatus/now")) {
+          return makeJsonResponse({ market: "open", afterHours: false, earlyHours: false });
+        }
+        if (url.includes("/vX/reference/financials")) {
+          return makeJsonResponse({ results: [], status: "OK" });
+        }
+        return makeJsonResponse({ status: "OK" });
+      };
+
+      const provider = new LiveMarketDataProvider("test-api-key", 0, 300);
+      const { stocks } = await provider.getStockUniverse();
+      const aapl = stocks.find((s) => s.symbol === "AAPL");
+
+      assert.ok(aapl !== undefined, "AAPL must be in universe results");
+      assert.ok(
+        aapl!.liquidityMetrics !== null,
+        "liquidityMetrics must be non-null when options data is present"
+      );
+      assert.ok(
+        aapl!.liquidityMetrics!.ivTermStructure !== null,
+        "ivTermStructure must be non-null even when all greeks.delta=0 (free-tier fallback must include all valid-IV contracts)"
+      );
+      assert.ok(
+        aapl!.liquidityMetrics!.ivTermStructure!.length >= 3,
+        `ivTermStructure must have at least 3 entries from 3 expirations (got ${aapl!.liquidityMetrics!.ivTermStructure!.length})`
+      );
+      // Verify the hump is detectable: exp2 must have higher IV than exp1 and exp3
+      const ts = aapl!.liquidityMetrics!.ivTermStructure!;
+      const e1iv = ts.find((e) => e.expiration === exp1)?.iv ?? 0;
+      const e2iv = ts.find((e) => e.expiration === exp2)?.iv ?? 0;
+      const e3iv = ts.find((e) => e.expiration === exp3)?.iv ?? 0;
+      assert.ok(
+        e2iv > e1iv && e2iv > e3iv,
+        `IV hump must be preserved in free-tier mode: exp2 IV ${e2iv} must exceed exp1 IV ${e1iv} and exp3 IV ${e3iv}`
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

@@ -399,7 +399,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.05,
         nearTermDte: 11,
         nearTermIv: 0.3,
-        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -419,7 +419,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.05,
         nearTermDte: 11,
         nearTermIv: 0.3,
-        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -442,7 +442,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.35,
         nearTermDte: 11,
         nearTermIv: 0.3,
-        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -463,7 +463,7 @@ describe("Filter 3 — Options Liquidity: sub-rule failures", () => {
         nearTermSpread: 0.09,
         nearTermDte: 11,
         nearTermIv: 0.3,
-        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null,
+        shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null,
       },
     });
     const result = filter3.evaluate(stock);
@@ -495,11 +495,11 @@ describe("Filter 3 — Options Liquidity: spread tier boundaries", () => {
     it(`$${price} stock: spread $${spreadOk} passes, $${spreadFail} fails (limit ${limit})`, () => {
       const goodStock = baseStock({
         price,
-        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadOk, nearTermDte: 11, nearTermIv: 0.3, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null },
+        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadOk, nearTermDte: 11, nearTermIv: 0.3, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null },
       });
       const badStock = baseStock({
         price,
-        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadFail, nearTermDte: 11, nearTermIv: 0.3, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null },
+        liquidityMetrics: { hasWeeklyOptions: true, hasPennyIncrements: true, nearTermSpread: spreadFail, nearTermDte: 11, nearTermIv: 0.3, shortCallStrike: null, shortPutStrike: null, callCalendarPeak: null, putCalendarPeak: null, ivTermStructure: null },
       });
       assert.equal(filter3.evaluate(goodStock).passed, true,  `spread $${spreadOk} on $${price} stock must pass`);
       assert.equal(filter3.evaluate(badStock).passed,  false, `spread $${spreadFail} on $${price} stock must fail`);
@@ -606,46 +606,76 @@ describe("Filter 4 — IV Rise into Earnings: result shape", () => {
 });
 
 // ===========================================================================
-// Filter 5 — Earnings Verified 2 Weeks Out (final gate)
+// Filter 5 — IV Term Structure Confirms Earnings Event
 // ===========================================================================
 
-describe("Filter 5 — Earnings Verified 2 Weeks Out: boundary cases", () => {
-  it("passes when earnings are exactly 14 days out (lower bound)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(14) });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, true, "14 days out must be confirmed as in-window");
-  });
+// ---- Test helpers for Filter 5 ----
 
-  it("passes when earnings are exactly 18 days out (upper bound)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(18) });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, true, "18 days out must be confirmed as in-window");
-  });
+/**
+ * Minimal ivTermStructure showing a clear IV hump at the earnings expiration.
+ * The earnings expiration is placed ON earningsDte so the filter's
+ * "first exp >= earningsDate" lookup finds it directly at index 1.
+ */
+function makeIvHump(earningsDte: number): Array<{ expiration: string; dte: number; iv: number }> {
+  return [
+    { expiration: dateFromFixed(earningsDte - 7), dte: earningsDte - 7, iv: 0.32 },
+    { expiration: dateFromFixed(earningsDte),     dte: earningsDte,     iv: 0.55 }, // hump peak
+    { expiration: dateFromFixed(earningsDte + 7), dte: earningsDte + 7, iv: 0.36 },
+  ];
+}
 
-  it("fails when earnings are 13 days out (below lower bound — window has closed)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(13) });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "13 days out — window has closed → must fail");
-  });
+/**
+ * Minimal ivTermStructure with NO hump — earnings-week IV lower than the prior week.
+ */
+function makeIvFlat(earningsDte: number): Array<{ expiration: string; dte: number; iv: number }> {
+  return [
+    { expiration: dateFromFixed(earningsDte - 7), dte: earningsDte - 7, iv: 0.48 },
+    { expiration: dateFromFixed(earningsDte),     dte: earningsDte,     iv: 0.45 }, // NOT a hump
+    { expiration: dateFromFixed(earningsDte + 7), dte: earningsDte + 7, iv: 0.38 },
+  ];
+}
 
-  it("fails when earnings are 19 days out (above upper bound — not yet in window)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(19) });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "19 days out — not yet in window → must fail");
-  });
+/** Helper for liquidity metrics with a specified ivTermStructure. */
+function metricsWithIv(
+  ivTermStructure: Array<{ expiration: string; dte: number; iv: number }> | null
+): import("../market-data.js").OptionsLiquidityMetrics {
+  return {
+    hasWeeklyOptions: true,
+    hasPennyIncrements: true,
+    nearTermSpread: 0.10,
+    nearTermDte: 9,
+    nearTermIv: 0.35,
+    shortCallStrike: null,
+    shortPutStrike: null,
+    callCalendarPeak: null,
+    putCalendarPeak: null,
+    ivTermStructure,
+  };
+}
 
-  it("is bypassed (passed=false, bypassed=true) when nextEarningsDate is null — data provider has no earnings calendar", () => {
-    // When the data provider cannot supply an earnings date (e.g. ThetaData), the filter
-    // is bypassed — matching Filter 2 behaviour.
+/**
+ * Standard in-window confirmed stock with a valid IV hump — should pass Filter 5.
+ */
+function f5PassingStock(overrides: Partial<StockQuote> = {}): StockQuote {
+  const earningsDte = 16;
+  return baseStock({
+    nextEarningsDate: dateFromFixed(earningsDte),
+    earningsDateSource: "confirmed" as const,
+    liquidityMetrics: metricsWithIv(makeIvHump(earningsDte)),
+    ...overrides,
+  });
+}
+
+describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part A — confirmed window", () => {
+  it("bypasses when nextEarningsDate is null (data provider has no earnings calendar)", () => {
     const stock = baseStock({ nextEarningsDate: null });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false, "null earnings date must not count as passed");
     assert.equal(result.bypassed, true,  "null earnings date must set bypassed=true");
     assert.ok(
-      result.calculatedValue.toLowerCase().includes("no earnings") ||
-        result.calculatedValue.toLowerCase().includes("no date") ||
-        result.calculatedValue.toLowerCase().includes("no confirmed"),
-      `calculatedValue must indicate missing date (got: "${result.calculatedValue}")`
+      result.calculatedValue.toLowerCase().includes("no") ||
+        result.calculatedValue.toLowerCase().includes("confirmed"),
+      `calculatedValue must indicate no earnings date (got: "${result.calculatedValue}")`
     );
     assert.ok(
       result.explanation.toLowerCase().includes("bypass") ||
@@ -654,158 +684,220 @@ describe("Filter 5 — Earnings Verified 2 Weeks Out: boundary cases", () => {
     );
   });
 
-  it("fails when earnings date is in the past", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(-3) });
+  it("bypasses when earningsDateSource is 'estimated' (estimated dates are too uncertain to act on)", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16), earningsDateSource: "estimated" });
     const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "past earnings date must not be verified as in-window");
+    assert.equal(result.passed,   false, "estimated date must not pass");
+    assert.equal(result.bypassed, true,  "estimated date must bypass — entry window cannot be trusted");
+    assert.ok(
+      result.calculatedValue.toLowerCase().includes("estimated") ||
+        result.explanation.toLowerCase().includes("estimated"),
+      `result must explain that the date is estimated (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("bypasses when earningsDateSource is missing (legacy provider predating the field)", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(16) }); // no earningsDateSource
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "unknown/missing source must bypass — cannot verify confirmation status");
+  });
+
+  it("fails (bypassed=false) when confirmed earnings are 13 days out — window has closed", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(13), earningsDateSource: "confirmed" });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false, "13 days out must fail — window closed");
+    assert.equal(result.bypassed, false, "out-of-window is a genuine failure, not a bypass");
+  });
+
+  it("fails (bypassed=false) when confirmed earnings are 19 days out — not yet in window", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(19), earningsDateSource: "confirmed" });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false, "19 days out must fail — not yet in window");
+    assert.equal(result.bypassed, false);
+  });
+
+  it("fails when confirmed earnings date is in the past", () => {
+    const stock = baseStock({ nextEarningsDate: dateFromFixed(-3), earningsDateSource: "confirmed" });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed, false, "past confirmed earnings must fail");
     assert.ok(
       result.calculatedValue.includes("ago"),
-      `calculatedValue must indicate the date was in the past (got: "${result.calculatedValue}")`
+      `calculatedValue must note the date was in the past (got: "${result.calculatedValue}")`
     );
   });
 });
 
-describe("Filter 5 — Earnings Verified 2 Weeks Out: independent re-verification", () => {
-  it("uses the same 14–18 day window as Filter 2 (shares EARNINGS_WINDOW constants)", () => {
-    // Both filters must agree on a date that is exactly on the boundary.
-    // Use the same FIXED_TODAY for both so the comparison is deterministic.
-    // Use confirmed dates so Filter 2's confirmed-source requirement is
-    // satisfied and the comparison isolates the day-window boundaries.
-    const onBoundary14 = baseStock({ nextEarningsDate: dateFromFixed(14), earningsDateSource: "confirmed" });
-    const onBoundary18 = baseStock({ nextEarningsDate: dateFromFixed(18), earningsDateSource: "confirmed" });
-    const justOutside13 = baseStock({ nextEarningsDate: dateFromFixed(13), earningsDateSource: "confirmed" });
-    const justOutside19 = baseStock({ nextEarningsDate: dateFromFixed(19), earningsDateSource: "confirmed" });
-
-    // Filter 5 must independently agree with Filter 2 on every boundary
-    assert.equal(filter5.evaluate(onBoundary14, FIXED_TODAY).passed, filter2.evaluate(onBoundary14, FIXED_TODAY).passed, "F5 and F2 must agree at 14d");
-    assert.equal(filter5.evaluate(onBoundary18, FIXED_TODAY).passed, filter2.evaluate(onBoundary18, FIXED_TODAY).passed, "F5 and F2 must agree at 18d");
-    assert.equal(filter5.evaluate(justOutside13, FIXED_TODAY).passed, filter2.evaluate(justOutside13, FIXED_TODAY).passed, "F5 and F2 must agree at 13d");
-    assert.equal(filter5.evaluate(justOutside19, FIXED_TODAY).passed, filter2.evaluate(justOutside19, FIXED_TODAY).passed, "F5 and F2 must agree at 19d");
+describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV hump", () => {
+  it("bypasses when liquidityMetrics is null (no options data — hump cannot be evaluated)", () => {
+    const stock = baseStock({
+      nextEarningsDate: dateFromFixed(16),
+      earningsDateSource: "confirmed",
+      liquidityMetrics: null,
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "null liquidityMetrics must bypass the hump check");
   });
 
+  it("bypasses when ivTermStructure is null (options present but no per-expiration IV data)", () => {
+    const stock = f5PassingStock({ liquidityMetrics: metricsWithIv(null) });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "null ivTermStructure must bypass — cannot evaluate hump");
+  });
+
+  it("bypasses when ivTermStructure has fewer than 3 entries", () => {
+    const earningsDte = 16;
+    const stock = f5PassingStock({
+      liquidityMetrics: metricsWithIv([
+        { expiration: dateFromFixed(earningsDte - 7), dte: earningsDte - 7, iv: 0.32 },
+        { expiration: dateFromFixed(earningsDte),     dte: earningsDte,     iv: 0.55 },
+        // only 2 entries — cannot compare both sides
+      ]),
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "< 3 entries must bypass — no adjacent expirations to compare");
+  });
+
+  it("bypasses when no expiration in the term structure is on or after the earnings date", () => {
+    const earningsDte = 16;
+    const stock = f5PassingStock({
+      liquidityMetrics: metricsWithIv([
+        { expiration: dateFromFixed(earningsDte - 14), dte: earningsDte - 14, iv: 0.30 },
+        { expiration: dateFromFixed(earningsDte - 7),  dte: earningsDte - 7,  iv: 0.35 },
+        { expiration: dateFromFixed(earningsDte - 1),  dte: earningsDte - 1,  iv: 0.40 },
+      ]),
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "must bypass when no expiration covers the earnings date");
+  });
+
+  it("bypasses when the earnings expiration is index 0 (no prior expiration to compare)", () => {
+    const earningsDte = 16;
+    const stock = f5PassingStock({
+      liquidityMetrics: metricsWithIv([
+        { expiration: dateFromFixed(earningsDte),      dte: earningsDte,      iv: 0.55 }, // idx 0 — no prev
+        { expiration: dateFromFixed(earningsDte + 7),  dte: earningsDte + 7,  iv: 0.36 },
+        { expiration: dateFromFixed(earningsDte + 14), dte: earningsDte + 14, iv: 0.30 },
+      ]),
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "must bypass when earnings expiration has no prior week");
+  });
+
+  it("bypasses when the earnings expiration is the last entry (no following expiration to compare)", () => {
+    const earningsDte = 16;
+    const stock = f5PassingStock({
+      liquidityMetrics: metricsWithIv([
+        { expiration: dateFromFixed(earningsDte - 7), dte: earningsDte - 7, iv: 0.32 },
+        { expiration: dateFromFixed(earningsDte - 1), dte: earningsDte - 1, iv: 0.40 },
+        { expiration: dateFromFixed(earningsDte),     dte: earningsDte,     iv: 0.55 }, // last — no next
+      ]),
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false);
+    assert.equal(result.bypassed, true, "must bypass when earnings expiration has no following week");
+  });
+
+  it("passes when confirmed, in window, and IV clearly humps at the earnings-week expiration", () => {
+    const stock = f5PassingStock();
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   true,  "confirmed + in-window + IV hump must pass");
+    assert.equal(result.bypassed, false);
+  });
+
+  it("fails (bypassed=false) when the earnings-week IV is lower than the prior week (no hump)", () => {
+    const earningsDte = 16;
+    const stock = f5PassingStock({ liquidityMetrics: metricsWithIv(makeIvFlat(earningsDte)) });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false, "flat/inverted IV at earnings must fail — no hump");
+    assert.equal(result.bypassed, false, "no hump is a genuine failure, not a bypass");
+    assert.ok(
+      result.calculatedValue.toLowerCase().includes("no iv hump") ||
+        result.calculatedValue.toLowerCase().includes("no hump"),
+      `calculatedValue must indicate no hump (got: "${result.calculatedValue}")`
+    );
+  });
+
+  it("fails when the earnings-week IV is lower than the following week (hump is after earnings)", () => {
+    const earningsDte = 16;
+    const stock = f5PassingStock({
+      liquidityMetrics: metricsWithIv([
+        { expiration: dateFromFixed(earningsDte - 7), dte: earningsDte - 7, iv: 0.30 },
+        { expiration: dateFromFixed(earningsDte),     dte: earningsDte,     iv: 0.55 }, // higher than prev...
+        { expiration: dateFromFixed(earningsDte + 7), dte: earningsDte + 7, iv: 0.70 }, // ...but LOWER than next
+      ]),
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false, "earnings IV must exceed BOTH neighbors — fails when next is higher");
+    assert.equal(result.bypassed, false);
+  });
+});
+
+describe("Filter 5 — IV Term Structure Confirms Earnings Event: shape and consistency", () => {
   it("result.name includes 'Filter 5'", () => {
-    const result = filter5.evaluate(baseStock({ nextEarningsDate: dateFromFixed(16) }), FIXED_TODAY);
+    const result = filter5.evaluate(f5PassingStock(), FIXED_TODAY);
     assert.ok(result.name.includes("Filter 5"), `name must include 'Filter 5' (got: "${result.name}")`);
   });
 
-  it("passing result explanation confirms the symbol and days remaining", () => {
-    const stock = baseStock({ symbol: "ACME", nextEarningsDate: dateFromFixed(16) });
+  it("passing result explanation mentions the symbol, days remaining, and IV hump", () => {
+    const stock = f5PassingStock({ symbol: "ACME" });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed, true);
+    assert.ok(result.explanation.includes("ACME"),
+      `explanation must mention the symbol (got: "${result.explanation}")`);
+    assert.ok(result.explanation.includes("16"),
+      `explanation must mention the days count (got: "${result.explanation}")`);
     assert.ok(
-      result.explanation.includes("ACME"),
-      `explanation must mention the symbol (got: "${result.explanation}")`
-    );
-    assert.ok(
-      result.explanation.includes("16"),
-      `explanation must mention the days count (got: "${result.explanation}")`
+      result.explanation.toLowerCase().includes("hump") ||
+        result.explanation.toLowerCase().includes("iv") ||
+        result.explanation.toLowerCase().includes("term structure"),
+      `explanation must reference the IV hump (got: "${result.explanation}")`
     );
   });
-});
 
-describe("Filter 5 — earnings must be the only upcoming event", () => {
-  it("fails when an ex-dividend date falls between today and earnings, naming the event", () => {
-    const stock = baseStock({
-      symbol: "DIVCO",
-      nextEarningsDate: dateFromFixed(16),
-      upcomingEvents: [{ type: "dividend", date: dateFromFixed(10) }],
+  it("uses the same 14–18 day window constants as Filter 2 — boundary agreement on confirmed dates", () => {
+    // For confirmed in-window stocks with IV hump data: F5.pass must equal F2.pass.
+    // For out-of-window stocks: both fail before reaching the IV hump check.
+    const humpMetrics = (dte: number) => metricsWithIv(makeIvHump(dte));
+
+    const inWindow14 = f5PassingStock({
+      nextEarningsDate: dateFromFixed(14),
+      liquidityMetrics: humpMetrics(14),
     });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "dividend before earnings must fail");
-    assert.equal(result.bypassed, false, "a real conflict is a fail, not a bypass");
-    assert.ok(
-      result.explanation.includes("ex-dividend date") && result.explanation.includes(dateFromFixed(10)),
-      `explanation must name the conflicting event and its date (got: "${result.explanation}")`
-    );
-  });
-
-  it("fails when a stock split falls between today and earnings", () => {
-    const stock = baseStock({
-      symbol: "SPLITCO",
-      nextEarningsDate: dateFromFixed(15),
-      upcomingEvents: [{ type: "split", date: dateFromFixed(5) }],
+    const inWindow18 = f5PassingStock({
+      nextEarningsDate: dateFromFixed(18),
+      liquidityMetrics: humpMetrics(18),
     });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "split before earnings must fail");
-    assert.ok(
-      result.explanation.includes("stock split") && result.explanation.includes(dateFromFixed(5)),
-      `explanation must name the split and its date (got: "${result.explanation}")`
-    );
+    const outBelow = baseStock({ nextEarningsDate: dateFromFixed(13), earningsDateSource: "confirmed" });
+    const outAbove = baseStock({ nextEarningsDate: dateFromFixed(19), earningsDateSource: "confirmed" });
+
+    assert.equal(filter5.evaluate(inWindow14, FIXED_TODAY).passed, filter2.evaluate(inWindow14, FIXED_TODAY).passed,
+      "F5 and F2 must both pass at 14d (confirmed + IV hump)");
+    assert.equal(filter5.evaluate(inWindow18, FIXED_TODAY).passed, filter2.evaluate(inWindow18, FIXED_TODAY).passed,
+      "F5 and F2 must both pass at 18d (confirmed + IV hump)");
+    assert.equal(filter5.evaluate(outBelow, FIXED_TODAY).passed, filter2.evaluate(outBelow, FIXED_TODAY).passed,
+      "F5 and F2 must both fail at 13d (window closed)");
+    assert.equal(filter5.evaluate(outAbove, FIXED_TODAY).passed, filter2.evaluate(outAbove, FIXED_TODAY).passed,
+      "F5 and F2 must both fail at 19d (not yet in window)");
   });
 
-  it("passes when earnings is in window and the only event list is empty", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(16), upcomingEvents: [] });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, true, "clean event calendar + in-window earnings must pass");
-    assert.ok(
-      result.explanation.toLowerCase().includes("only"),
-      `explanation must state earnings is the only upcoming event (got: "${result.explanation}")`
-    );
-  });
-
-  it("fails when an ex-dividend date lands exactly today (boundary inclusive)", () => {
-    const stock = baseStock({
-      nextEarningsDate: dateFromFixed(16),
-      upcomingEvents: [{ type: "dividend", date: dateFromFixed(0) }],
-    });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "an event dated today must still disqualify the stock");
-    assert.equal(result.bypassed, false);
-  });
-
-  it("fails when a split lands exactly on the earnings date (boundary inclusive)", () => {
-    const stock = baseStock({
-      nextEarningsDate: dateFromFixed(15),
-      upcomingEvents: [{ type: "split", date: dateFromFixed(15) }],
-    });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "an event on the earnings date itself must disqualify the stock");
-  });
-
-  it("ignores events dated after the earnings date (post-earnings dividend is fine)", () => {
-    const stock = baseStock({
-      nextEarningsDate: dateFromFixed(15),
-      upcomingEvents: [{ type: "dividend", date: dateFromFixed(25) }],
-    });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, true, "an event after earnings must not disqualify the stock");
-  });
-
-  it("is bypassed (not passed) when event data is unavailable (upcomingEvents=null)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(16), upcomingEvents: null });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false, "unavailable event data must not silently pass");
-    assert.equal(result.bypassed, true, "unavailable event data must bypass");
-    assert.ok(
-      result.explanation.toLowerCase().includes("unavailable") ||
-        result.explanation.toLowerCase().includes("could not run"),
-      `explanation must say the event check couldn't run (got: "${result.explanation}")`
-    );
-  });
-
-  it("is bypassed when the provider predates the field (upcomingEvents undefined)", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(16) });
-    delete (stock as Partial<typeof stock>).upcomingEvents;
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false);
-    assert.equal(result.bypassed, true, "missing field must be treated like unavailable data");
-  });
-
-  it("window failure takes precedence: out-of-window earnings fails even with a clean calendar", () => {
-    const stock = baseStock({ nextEarningsDate: dateFromFixed(19), upcomingEvents: [] });
-    const result = filter5.evaluate(stock, FIXED_TODAY);
-    assert.equal(result.passed, false);
-    assert.equal(result.bypassed, false);
-  });
-
-  it("filter description mentions the only-upcoming-event rule", () => {
+  it("filter description and threshold mention IV term structure and confirmed earnings", () => {
     const defs = getFilterDefinitions();
     const def = defs.find((d) => d.name.includes("Filter 5"));
     assert.ok(def, "Filter 5 definition must exist");
     const text = (def!.description + " " + def!.threshold).toLowerCase();
     assert.ok(
-      text.includes("dividend") && text.includes("split"),
-      `Filter 5 description/threshold must mention dividends and splits (got: "${def!.description}" / "${def!.threshold}")`
+      text.includes("iv") || text.includes("implied"),
+      `Filter 5 description/threshold must mention IV (got: "${def!.description}" / "${def!.threshold}")`
+    );
+    assert.ok(
+      text.includes("confirm") || text.includes("hump") || text.includes("term structure"),
+      `Filter 5 description/threshold must mention hump/confirmation/term structure (got: "${def!.description}" / "${def!.threshold}")`
     );
   });
 });
@@ -831,6 +923,7 @@ function calendarMetrics(overrides: {
     shortPutStrike:  overrides.shortPutStrike  !== undefined ? overrides.shortPutStrike  : 90,
     callCalendarPeak: overrides.callCalendarPeak !== undefined ? overrides.callCalendarPeak : 1.50,
     putCalendarPeak:  overrides.putCalendarPeak  !== undefined ? overrides.putCalendarPeak  : 1.20,
+    ivTermStructure: null,
   };
 }
 
@@ -1349,7 +1442,7 @@ function fullyQualifiedStock(): StockQuote {
     sector: "tech",
     nextEarningsDate: dateFromFixed(16),
     earningsDateSource: "confirmed", // F2 now requires a confirmed date
-    upcomingEvents: [], // events lookup succeeded, calendar clean → F5 event check passes
+    upcomingEvents: [],
     liquidityMetrics: {
       hasWeeklyOptions: true,
       hasPennyIncrements: true,
@@ -1360,6 +1453,12 @@ function fullyQualifiedStock(): StockQuote {
       shortPutStrike: 93,
       callCalendarPeak: 1.50,
       putCalendarPeak: 1.20,
+      // IV hump at earningsDte=16 — required for Filter 5 to pass
+      ivTermStructure: [
+        { expiration: dateFromFixed(9),  dte: 9,  iv: 0.32 },
+        { expiration: dateFromFixed(16), dte: 16, iv: 0.55 },
+        { expiration: dateFromFixed(23), dte: 23, iv: 0.36 },
+      ],
     },
     earningsIvHistory: [
       { earningsDate: "2025-08-09", ivBaseline: 0.28, ivBeforeEarnings: 0.41, ivRose: true },

@@ -356,6 +356,7 @@ function makeThetaDataStock(overrides: Partial<StockQuote> = {}): StockQuote {
       shortPutStrike:    575.0,        // 30–60¢ OTM put strike
       callCalendarPeak:  3.20,         // > 0 — Filter 6 passes
       putCalendarPeak:   2.75,         // > 0 — Filter 6 passes
+      ivTermStructure:   null,         // ThetaData mode — no confirmed earnings → F5 bypasses
     },
     ...overrides,
   };
@@ -1131,19 +1132,30 @@ function daysFromToday(days: number): string {
 }
 
 function makeThetaDataStockWithPolygon(overrides: Partial<StockQuote> = {}): StockQuote {
+  const earningsDte = 14; // always 14 days from today → inside F2/F5 window
+  const earningsDate = daysFromToday(earningsDte);
   return {
     // Use the same structural base as makeThetaDataStock() …
     ...makeThetaDataStock(),
-    // … but override the two fields that Polygon now supplies:
-    nextEarningsDate:  daysFromToday(14),  // always 14 days from today → inside F2/F5 window
-    earningsDateSource: "confirmed",       // F2 requires a confirmed date to pass
-    upcomingEvents:    [],                 // events lookup succeeded, clean calendar → F5 event check passes
+    // … but override the fields that Polygon now supplies:
+    nextEarningsDate:  earningsDate,
+    earningsDateSource: "confirmed",       // F2 and F5 both require a confirmed date
+    upcomingEvents:    [],
     earningsIvHistory: [              // 4/4 ivRose → F4 passes
       { earningsDate: "2025-08-01", ivBaseline: 0.28, ivBeforeEarnings: 0.45, ivRose: true },
       { earningsDate: "2025-11-01", ivBaseline: 0.31, ivBeforeEarnings: 0.49, ivRose: true },
       { earningsDate: "2026-02-01", ivBaseline: 0.26, ivBeforeEarnings: 0.42, ivRose: true },
       { earningsDate: "2026-05-01", ivBaseline: 0.29, ivBeforeEarnings: 0.46, ivRose: true },
     ],
+    // IV term structure with a hump at the earnings expiration — Filter 5 requires this.
+    liquidityMetrics: {
+      ...makeThetaDataStock().liquidityMetrics!,
+      ivTermStructure: [
+        { expiration: daysFromToday(earningsDte - 7), dte: earningsDte - 7, iv: 0.32 },
+        { expiration: daysFromToday(earningsDte),     dte: earningsDte,     iv: 0.55 }, // hump peak at earnings exp
+        { expiration: daysFromToday(earningsDte + 7), dte: earningsDte + 7, iv: 0.36 },
+      ],
+    },
     ...overrides,
   };
 }
@@ -1390,7 +1402,12 @@ describe("ThetaDataProvider.enrichTicker wiring: polygonApiKey propagates to Sto
     }
   });
 
-  it("Filters 2, 4, 5 have bypassed:false on the StockQuote produced by enrichTicker with polygonApiKey set", async () => {
+  it("Filters 2 and 4 have bypassed:false; Filter 5 bypasses (estimated date) on enrichTicker with polygonApiKey set", async () => {
+    // Filter 5 now requires a CONFIRMED earnings date. Polygon's /vX/reference/financials
+    // endpoint returns historical filing dates only — the next date is extrapolated
+    // (+91 days), so earningsDateSource is "estimated". Filter 5 correctly bypasses
+    // estimated dates. Filters 2 and 4 continue to evaluate (bypassed:false) because
+    // nextEarningsDate and earningsIvHistory are both non-null.
     const origFetch = globalThis.fetch;
 
     const stubFetch: typeof globalThis.fetch = async (input) => {
@@ -1428,18 +1445,26 @@ describe("ThetaDataProvider.enrichTicker wiring: polygonApiKey propagates to Sto
 
       assert.equal(
         f2.bypassed, false,
-        `Filter 2 must not be bypassed on a quote produced by enrichTicker with polygonApiKey set ` +
+        `Filter 2 must not be bypassed when nextEarningsDate is non-null ` +
         `(got bypassed=${f2.bypassed}, explanation="${f2.explanation}")`
       );
       assert.equal(
         f4.bypassed, false,
-        `Filter 4 must not be bypassed on a quote produced by enrichTicker with polygonApiKey set ` +
+        `Filter 4 must not be bypassed when earningsIvHistory is non-null ` +
         `(got bypassed=${f4.bypassed}, explanation="${f4.explanation}")`
       );
+      // Filter 5 correctly bypasses: Polygon's extrapolated date is "estimated",
+      // and Filter 5 only evaluates confirmed dates (estimated → bypass).
       assert.equal(
-        f5.bypassed, false,
-        `Filter 5 must not be bypassed on a quote produced by enrichTicker with polygonApiKey set ` +
+        f5.bypassed, true,
+        `Filter 5 must bypass when the earnings date is estimated (not confirmed) ` +
         `(got bypassed=${f5.bypassed}, explanation="${f5.explanation}")`
+      );
+      assert.ok(
+        f5.explanation.toLowerCase().includes("estimated") ||
+          f5.explanation.toLowerCase().includes("bypass") ||
+          f5.explanation.toLowerCase().includes("unavailable"),
+        `Filter 5 explanation must mention estimated/bypass (got: "${f5.explanation}")`
       );
     } finally {
       globalThis.fetch = origFetch;
