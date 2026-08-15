@@ -750,12 +750,28 @@ const TICKER_NAMES: Record<string, string> = {
 };
 
 /**
+ * Sectors that are excluded from screening (Filter 1).
+ *
+ * Stocks in these sectors are dropped BEFORE any enrichment (options data,
+ * earnings calendar, IV history) so that the screener never spends network
+ * round-trips on tickers that are guaranteed to fail Filter 1.
+ *
+ * Must stay in sync with EXCLUDED_SECTORS in screening-engine.ts.
+ */
+export const ENRICHMENT_EXCLUDED_SECTORS = new Set([
+  "oil",
+  "biotech",
+  "healthcare",
+  "defense",
+]);
+
+/**
  * Sector classification for every symbol in the screener universe.
  * Used by Filter 1 to exclude oil, biotech, healthcare, and military defense.
  *
  * Excluded sectors: "oil" | "biotech" | "healthcare" | "defense"
  */
-const TICKER_SECTORS: Record<string, string> = {
+export const TICKER_SECTORS: Record<string, string> = {
   // Mega-cap tech
   AAPL: "tech", MSFT: "tech", NVDA: "tech", GOOGL: "tech", GOOG: "tech",
   AMZN: "tech", META: "tech",
@@ -2051,11 +2067,22 @@ export class LiveMarketDataProvider implements IMarketDataProvider {
     );
     const snaps = snapData.tickers ?? [];
 
-    // 2. Per-ticker enrichment in parallel (rate limiter controls throughput)
+    // 2. Per-ticker enrichment in parallel (rate limiter controls throughput).
+    //    Sector-excluded tickers are skipped entirely so we never spend API
+    //    calls on stocks that are guaranteed to fail Filter 1.
+    const eligibleSnaps = snaps.filter(
+      (snap) => !ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[snap.ticker] ?? "other")
+    );
+    const excludedCount = snaps.length - eligibleSnaps.length;
+    if (excludedCount > 0) {
+      console.info(
+        `[LiveMarketDataProvider] Pre-filter: skipping ${excludedCount} sector-excluded ticker(s) before enrichment.`,
+      );
+    }
     const enriched: StockQuote[] = [];
 
     await Promise.all(
-      snaps.map(async (snap) => {
+      eligibleSnaps.map(async (snap) => {
         try {
           const price =
             safeNum(snap.lastTrade?.p) ||
@@ -3202,12 +3229,25 @@ export class ThetaDataProvider implements IMarketDataProvider {
   private async fetchUniverseFromThetaData(): Promise<StockQuote[]> {
     const todayMs = Date.now();
 
-    // Batch-fetch all stock quotes from Yahoo Finance in one HTTP call
-    const yahooData = await fetchYahooStockQuotes(LIVE_STOCK_UNIVERSE);
+    // Build the eligible symbol list BEFORE any network calls so that
+    // sector-excluded tickers never reach the Yahoo Finance fetch, gRPC
+    // enrichment, or Polygon earnings lookups.
+    const eligibleSymbols = LIVE_STOCK_UNIVERSE.filter(
+      (sym) => !ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+    );
+    const excludedCount = LIVE_STOCK_UNIVERSE.length - eligibleSymbols.length;
+    if (excludedCount > 0) {
+      console.info(
+        `[ThetaDataProvider] Pre-filter: skipping ${excludedCount} sector-excluded ticker(s) before enrichment.`,
+      );
+    }
 
-    // Enrich each ticker concurrently (semaphore limits gRPC concurrency)
+    // Batch-fetch stock quotes from Yahoo Finance for eligible symbols only
+    const yahooData = await fetchYahooStockQuotes(eligibleSymbols);
+
+    // Enrich each eligible ticker concurrently (semaphore limits gRPC concurrency)
     const results = await Promise.all(
-      LIVE_STOCK_UNIVERSE.map(sym => this.enrichTicker(sym, yahooData, todayMs))
+      eligibleSymbols.map(sym => this.enrichTicker(sym, yahooData, todayMs))
     );
 
     return results.filter((q): q is StockQuote => q !== null);

@@ -11,9 +11,14 @@
  *   pnpm --filter @workspace/api-server run test
  */
 
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { ThetaDataProvider } from "../market-data.js";
+import {
+  ThetaDataProvider,
+  ENRICHMENT_EXCLUDED_SECTORS,
+  TICKER_SECTORS,
+  LIVE_STOCK_UNIVERSE,
+} from "../market-data.js";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers — ThetaData-shaped row objects (as produced by the live stream)
@@ -218,6 +223,98 @@ describe("ThetaDataProvider.buildLiquidityMetrics — underlying_price extracted
       gRows[0]["underlying_price"],
       305.6,
       "GreeksAll row must contain underlying_price=305.6 (ThetaData's field name)"
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sector pre-filter: excluded symbols must never trigger Yahoo Finance calls
+// ---------------------------------------------------------------------------
+
+describe("ThetaDataProvider — sector pre-filter short-circuit", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  before(() => { originalFetch = globalThis.fetch; });
+  after(() => { globalThis.fetch = originalFetch; });
+
+  it("sector-excluded symbols trigger no Yahoo Finance requests and are absent from the universe", async () => {
+    // Identify excluded symbols from the live universe
+    const excludedSymbols = new Set(
+      LIVE_STOCK_UNIVERSE.filter((sym) =>
+        ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+      )
+    );
+    assert.ok(
+      excludedSymbols.size > 0,
+      "test requires at least one excluded-sector symbol in LIVE_STOCK_UNIVERSE"
+    );
+
+    // Track which Yahoo Finance URLs were fetched
+    const yahooCalls = new Set<string>();
+
+    globalThis.fetch = async (input: string | URL | Request): Promise<Response> => {
+      const url = input instanceof Request ? input.url : input.toString();
+
+      // Record Yahoo Finance per-symbol chart requests
+      if (url.includes("finance.yahoo.com")) {
+        // URL format: .../v8/finance/chart/<SYMBOL>?...
+        const m = url.match(/\/chart\/([^?]+)/);
+        if (m) yahooCalls.add(decodeURIComponent(m[1]!));
+      }
+
+      // Polygon Earnings (financials) — return empty so no IV history is attempted
+      if (url.includes("/vX/reference/financials")) {
+        return new Response(JSON.stringify({ results: [], status: "OK" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Default: return an empty OK so any remaining fetch doesn't hang
+      return new Response(JSON.stringify({ status: "OK" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    // Construct a provider that bypasses the actual ThetaData gRPC connection
+    // by monkey-patching the internal enrichTicker to return null for all symbols
+    // (we only care that Yahoo fetch calls for excluded symbols are absent).
+    const provider = new ThetaDataProvider(
+      "test-key-not-used",
+      0 /* cacheTtlMs — immediate stale, never interferes */
+    );
+
+    // Intercept enrichTicker to avoid real gRPC calls while still letting
+    // fetchUniverseFromThetaData complete its Yahoo fetch path.
+    (provider as any).enrichTicker = async () => null;
+
+    // fetchUniverseFromThetaData is private; invoke via the public interface.
+    // We don't need the result — only whether Yahoo was called for excluded symbols.
+    await (provider as any).fetchUniverseFromThetaData();
+
+    // No excluded-sector symbol should have been looked up on Yahoo Finance
+    for (const sym of excludedSymbols) {
+      assert.ok(
+        !yahooCalls.has(sym),
+        `${sym} is sector-excluded — its Yahoo Finance chart endpoint must not be called (pre-filter short-circuit)`
+      );
+    }
+
+    // All non-excluded symbols should have been fetched (confirming the filter
+    // is selective, not accidentally skipping everything)
+    const nonExcluded = LIVE_STOCK_UNIVERSE.filter(
+      (sym) => !ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+    );
+    assert.ok(
+      nonExcluded.length > 0,
+      "test requires at least one non-excluded symbol"
+    );
+    assert.ok(
+      nonExcluded.every((sym) => yahooCalls.has(sym)),
+      `all non-excluded symbols must be fetched from Yahoo Finance; missing: ${
+        nonExcluded.filter((sym) => !yahooCalls.has(sym)).join(", ")
+      }`
     );
   });
 });

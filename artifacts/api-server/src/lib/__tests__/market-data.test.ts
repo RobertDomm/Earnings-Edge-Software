@@ -16,6 +16,8 @@ import {
   MockMarketDataProvider,
   LiveMarketDataProvider,
   LIVE_STOCK_UNIVERSE,
+  ENRICHMENT_EXCLUDED_SECTORS,
+  TICKER_SECTORS,
 } from "../market-data.js";
 
 // ---------------------------------------------------------------------------
@@ -221,16 +223,20 @@ describe("LiveMarketDataProvider universe cache", () => {
   });
 
   it(
-    "getStockUniverse enriches all universe tickers with correct Polygon field mappings",
+    "getStockUniverse enriches eligible (non-excluded) universe tickers with correct Polygon field mappings",
     async () => {
       // 10 000 RPM = 6 ms between requests — finite rate limiter, fast enough for tests
       const provider = new LiveMarketDataProvider("test-api-key", 10_000, 60);
       const { stocks } = await provider.getStockUniverse();
 
-      // All symbols in LIVE_STOCK_UNIVERSE should be enriched (mock returns data for all)
+      // Sector-excluded tickers are skipped before enrichment — they should not
+      // appear in the universe result at all.
+      const expectedCount = LIVE_STOCK_UNIVERSE.filter(
+        (sym) => !ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+      ).length;
       assert.ok(
-        stocks.length === LIVE_STOCK_UNIVERSE.length,
-        `expected ${LIVE_STOCK_UNIVERSE.length} stocks, got ${stocks.length}`
+        stocks.length === expectedCount,
+        `expected ${expectedCount} non-excluded stocks, got ${stocks.length}`
       );
 
       for (const stock of stocks) {
@@ -253,6 +259,57 @@ describe("LiveMarketDataProvider universe cache", () => {
       }
     }
   );
+
+  it("sector-excluded tickers are never enriched and absent from the universe result", async () => {
+    // Identify the symbols in LIVE_STOCK_UNIVERSE that belong to excluded sectors.
+    const excludedSymbols = new Set(
+      LIVE_STOCK_UNIVERSE.filter((sym) =>
+        ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+      )
+    );
+    assert.ok(
+      excludedSymbols.size > 0,
+      "test is only meaningful when the universe contains excluded-sector symbols"
+    );
+
+    // Track which per-ticker options endpoints were requested.
+    const optionsCallsFor = new Set<string>();
+    globalThis.fetch = buildMockFetch((url) => {
+      // /v3/snapshot/options/<SYMBOL> — per-ticker enrichment call
+      const m = url.match(/\/v3\/snapshot\/options\/([A-Z]+)/);
+      if (m) optionsCallsFor.add(m[1]!);
+    });
+
+    const provider = new LiveMarketDataProvider("test-api-key", 10_000, 300);
+    const { stocks } = await provider.getStockUniverse();
+
+    // 1. No enrichment call (options endpoint) was made for any excluded ticker.
+    for (const sym of excludedSymbols) {
+      assert.ok(
+        !optionsCallsFor.has(sym),
+        `${sym} is sector-excluded — its options endpoint must never be called (pre-filter short-circuit)`
+      );
+    }
+
+    // 2. Excluded-sector tickers must not appear in the returned universe.
+    const returnedSymbols = new Set(stocks.map((s) => s.symbol));
+    for (const sym of excludedSymbols) {
+      assert.ok(
+        !returnedSymbols.has(sym),
+        `${sym} is sector-excluded — it must not appear in the universe result`
+      );
+    }
+
+    // 3. All non-excluded tickers that Polygon returned data for are present.
+    const nonExcludedUniverseCount = LIVE_STOCK_UNIVERSE.filter(
+      (sym) => !ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+    ).length;
+    assert.equal(
+      stocks.length,
+      nonExcludedUniverseCount,
+      `universe result must contain exactly the non-excluded tickers (expected ${nonExcludedUniverseCount}, got ${stocks.length})`
+    );
+  });
 
   it("construction triggers exactly one batch snapshot request (single pre-warm)", async () => {
     let batchSnapshotCalls = 0;
