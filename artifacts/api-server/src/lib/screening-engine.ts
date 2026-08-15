@@ -394,7 +394,7 @@ const filter4: IFilterRule = {
 const FILTER5_THRESHOLD = `Confirmed earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out; earnings-week IV > adjacent expirations`;
 
 const filter5: IFilterRule = {
-  name: "Filter 5 — IV Term Structure Confirms Earnings Event",
+  name: "Filter 5 — IV Confirms Earnings Event",
   description:
     "Final sign-off: re-confirms earnings fall in the 14–18 day window (confirmed dates only), then verifies the options market is pricing in the specific earnings event by requiring the expiration covering earnings to carry higher implied volatility than both the week before and the week after (IV term structure hump).",
   defaultThreshold: FILTER5_THRESHOLD,
@@ -555,7 +555,7 @@ const filter5: IFilterRule = {
 // ---------------------------------------------------------------------------
 
 const filter6: IFilterRule = {
-  name: "Filter 6 — Calendar Ratio Spread Structure",
+  name: "Filter 6 — Risk Graph",
   description:
     "Verifies that a calendar ratio spread (1 short near-term, 2 longs far-term at the 30–60¢ OTM strikes) produces a risk graph where both peaks sit above the zero line — confirming the trade structure is viable before entry.",
   defaultThreshold: "Both calendar peaks > $0 at short expiry",

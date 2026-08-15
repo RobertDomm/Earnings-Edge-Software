@@ -79,10 +79,10 @@
      --primary stays blue (tickers, scanner button). */
   --background: 0 0% 100%;
   --foreground: 0 0% 0%;
-  --card: 0 0% 100%;
+  --card: 0 0% 96.5%;
   --card-foreground: 0 0% 0%;
   --card-border: 0 0% 0%;
-  --popover: 0 0% 100%;
+  --popover: 0 0% 96.5%;
   --popover-foreground: 0 0% 0%;
   --popover-border: 0 0% 0%;
   --primary: 210 100% 50%;
