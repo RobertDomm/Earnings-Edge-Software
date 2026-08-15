@@ -24,6 +24,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:20427',
     trace: 'on-first-retry',
+    launchOptions: {
+      // Disable GPU acceleration — required in the Replit sandbox where the
+      // system Mesa package does not expose libgbm.so.1.
+      args: ['--disable-gpu', '--no-sandbox'],
+    },
   },
 
   projects: [
