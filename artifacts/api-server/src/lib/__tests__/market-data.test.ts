@@ -311,6 +311,44 @@ describe("LiveMarketDataProvider universe cache", () => {
     );
   });
 
+  it("per-ticker enrichment call count equals LIVE_STOCK_UNIVERSE.length minus excluded_count", async () => {
+    // This is the performance regression guard: if any sector-excluded ticker
+    // accidentally slips through the pre-filter, the call count will exceed
+    // the expected value and the test will fail immediately.
+    const excludedCount = LIVE_STOCK_UNIVERSE.filter((sym) =>
+      ENRICHMENT_EXCLUDED_SECTORS.has(TICKER_SECTORS[sym] ?? "other")
+    ).length;
+    const expectedCallCount = LIVE_STOCK_UNIVERSE.length - excludedCount;
+
+    assert.ok(
+      excludedCount > 0,
+      "test is only meaningful when the universe contains excluded-sector symbols"
+    );
+    assert.ok(
+      expectedCallCount > 0,
+      "test requires at least one non-excluded ticker in the universe"
+    );
+
+    let perTickerEnrichmentCalls = 0;
+    globalThis.fetch = buildMockFetch((url) => {
+      // /v3/snapshot/options/<SYMBOL> is the per-ticker enrichment endpoint
+      if (/\/v3\/snapshot\/options\/[A-Z]+/.test(url)) {
+        perTickerEnrichmentCalls++;
+      }
+    });
+
+    const provider = new LiveMarketDataProvider("test-api-key", 10_000, 300);
+    await provider.getStockUniverse();
+
+    assert.equal(
+      perTickerEnrichmentCalls,
+      expectedCallCount,
+      `expected exactly ${expectedCallCount} per-ticker enrichment calls ` +
+        `(${LIVE_STOCK_UNIVERSE.length} universe − ${excludedCount} excluded), ` +
+        `got ${perTickerEnrichmentCalls} — a sector-excluded ticker may have slipped through the pre-filter`
+    );
+  });
+
   it("construction triggers exactly one batch snapshot request (single pre-warm)", async () => {
     let batchSnapshotCalls = 0;
     globalThis.fetch = buildMockFetch((url) => {
