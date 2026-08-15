@@ -140,26 +140,23 @@ describe("Full pipeline — filterScore consistency", () => {
     }
   });
 
-  it("stocks with at least one genuine failure have filterScore < 100", () => {
-    // A stock with qualifiedWithCaveats=true has no failures (only bypasses) so filterScore=100.
-    // Only stocks that have at least one genuine failure should have filterScore < 100.
-    for (const r of results.filter((r) => !r.qualified && !r.qualifiedWithCaveats)) {
+  it("stocks with at least one failure have filterScore < 100", () => {
+    for (const r of results.filter((r) => !r.qualified)) {
       assert.ok(
         r.filterScore < 100,
-        `${r.symbol} has a genuine failure so filterScore must be < 100 (got ${r.filterScore})`
+        `${r.symbol} is not qualified so filterScore must be < 100 (got ${r.filterScore})`
       );
     }
   });
 
-  it("filterScore equals the percentage of filters that passed or were bypassed (rounded)", () => {
+  it("filterScore equals the percentage of filters that passed (rounded)", () => {
     for (const r of results) {
-      // filterScore counts genuine passes AND bypasses — only genuine failures reduce the score.
-      const creditCount = r.filterResults.filter((f) => f.passed || f.bypassed).length;
-      const expected = Math.round((creditCount / FILTER_RULES.length) * 100);
+      const passCount = r.filterResults.filter((f) => f.passed).length;
+      const expected  = Math.round((passCount / FILTER_RULES.length) * 100);
       assert.equal(
         r.filterScore,
         expected,
-        `${r.symbol}: filterScore must be ${expected} (${creditCount}/${FILTER_RULES.length} passed or bypassed), got ${r.filterScore}`
+        `${r.symbol}: filterScore must be ${expected} (${passCount}/${FILTER_RULES.length} passed), got ${r.filterScore}`
       );
     }
   });
@@ -291,13 +288,11 @@ describe("Full pipeline — disqualification reasons", () => {
       "AMZN must fail Filter 2 (earnings 2 d out)");
   });
 
-  it("SPY Filter 2 is bypassed (not passed, not failed) — ETF has no earnings date from provider", () => {
-    // Null earnings date → bypassed=true, passed=false.  SPY surfaces as not_qualified
-    // (Filter 6 fails), but the bypass architecture lets ThetaData stocks with real
-    // F1/F3/F6 data surface as qualified_with_caveats rather than silently sinking to 0.
+  it("SPY Filter 2 fails (bypassed=false) — ETF has no earnings date, which is a genuine failure", () => {
+    // Null earnings date → passed=false, bypassed=false. No earnings = can't verify the window.
     const f2 = resultFor("SPY").filterResults[1];
-    assert.equal(f2.bypassed, true,  "SPY Filter 2 must be bypassed (bypassed=true)");
-    assert.equal(f2.passed,   false, "SPY Filter 2 must not count as passed (passed=false)");
+    assert.equal(f2.passed,   false, "SPY Filter 2 must fail (passed=false)");
+    assert.equal(f2.bypassed, false, "SPY Filter 2 must not be bypassed — null date is a genuine failure");
   });
 
   it("SPY fails Filter 6 (ETF — no 30–60¢ OTM calendar structure)", () => {

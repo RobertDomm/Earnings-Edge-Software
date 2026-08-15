@@ -20,17 +20,13 @@ import type { StockQuote } from "./market-data.js";
 export interface FilterResult {
   name: string;
   /**
-   * True when the filter genuinely evaluated the stock and the stock met the criterion.
-   * False when the stock failed the criterion OR when the filter was bypassed because
-   * the required data is unavailable from the current data provider (see `bypassed`).
+   * True when the filter evaluated the stock and the stock met the criterion.
+   * False when the stock failed the criterion.
    */
   passed: boolean;
   /**
-   * True when the filter could not be evaluated because the required data is missing
-   * from the current data provider (e.g. ThetaData does not supply earnings dates).
-   * A bypassed filter is neither a pass nor a failure; the stock is surfaced with
-   * a "qualified with caveats" status rather than a genuine qualification.
-   * Always false when `passed` is true.
+   * Always false. Kept for API compatibility; previously used to indicate
+   * missing data (now treated as a genuine failure instead of a bypass).
    */
   bypassed: boolean;
   calculatedValue: string;
@@ -58,25 +54,22 @@ export interface ScreeningResult {
   earningsDateSource: "confirmed" | "estimated" | null;
   filterResults: FilterResult[];
   /**
-   * 0–100 percentage of filters that either genuinely passed or were bypassed.
-   * Reflects how close the stock is to qualifying; penalises only genuine failures.
+   * 0–100 percentage of filters that genuinely passed.
+   * Reflects how close the stock is to qualifying; any failure reduces the score.
    */
   filterScore: number;
   /**
-   * True only when every filter passed with real data — no bypasses, no failures.
-   * This is the strongest signal; review the stock normally.
+   * True only when every filter passed — no failures.
    */
   qualified: boolean;
   /**
-   * True when every filter either passed or was bypassed (none failed), but at
-   * least one filter was bypassed due to missing data.  The stock looks structurally
-   * sound but requires manual verification of the bypassed criteria before entry.
+   * Always false. Kept for API compatibility; the "qualified with caveats"
+   * concept has been removed — filters are strictly pass or fail.
    */
   qualifiedWithCaveats: boolean;
   /**
-   * "qualified"             — all 6 filters passed with real data.
-   * "qualified_with_caveats"— no filter failed; some were bypassed due to missing data.
-   * "not_qualified"         — at least one filter genuinely failed.
+   * "qualified"     — all 6 filters passed.
+   * "not_qualified" — at least one filter failed.
    */
   status: "qualified" | "qualified_with_caveats" | "not_qualified";
 }
@@ -174,16 +167,13 @@ const filter2: IFilterRule = {
   defaultThreshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
   evaluate(stock, today?: Date) {
     if (!stock.nextEarningsDate) {
-      // No earnings date from the data provider (e.g. ThetaData has no earnings-calendar
-      // endpoint on this subscription tier).  Mark as bypassed — neither a pass nor a
-      // failure — so the stock surfaces as "qualified with caveats" for manual review.
       return {
         name: this.name,
         passed: false,
-        bypassed: true,
+        bypassed: false,
         calculatedValue: "No earnings date",
         threshold: `Earnings ${EARNINGS_WINDOW_MIN}–${EARNINGS_WINDOW_MAX} days out`,
-        explanation: `Earnings date unavailable for ${stock.symbol} from the current data provider — filter bypassed. Verify the earnings window manually before entry.`,
+        explanation: `No earnings date available for ${stock.symbol}. A confirmed earnings date falling 14–18 days out is required.`,
       };
     }
 
@@ -326,16 +316,13 @@ const filter4: IFilterRule = {
     const history = stock.earningsIvHistory;
 
     if (history === null) {
-      // Historical IV data is unavailable from the current data provider (e.g. ThetaData
-      // does not expose historical options pricing on this subscription tier).  Mark as
-      // bypassed — neither a pass nor a failure — so the stock surfaces with caveats.
       return {
         name: this.name,
         passed: false,
-        bypassed: true,
+        bypassed: false,
         calculatedValue: "No IV history",
         threshold: `${REQUIRED_IV_CYCLES}/${REQUIRED_IV_CYCLES} cycles show IV expansion`,
-        explanation: `Historical IV data unavailable for ${stock.symbol} from the current data provider — filter bypassed. Verify the pre-earnings IV run-up pattern manually before entry.`,
+        explanation: `No historical IV data available for ${stock.symbol}. ${REQUIRED_IV_CYCLES} prior earnings cycles showing IV expansion before earnings are required.`,
       };
     }
 
@@ -418,10 +405,10 @@ const filter5: IFilterRule = {
       return {
         name: this.name,
         passed: false,
-        bypassed: true,
+        bypassed: false,
         calculatedValue: "No confirmed earnings date",
         threshold: FILTER5_THRESHOLD,
-        explanation: `Earnings date unavailable for ${stock.symbol} — filter bypassed. Verify the earnings window and IV term structure manually before entry.`,
+        explanation: `No earnings date available for ${stock.symbol}. A confirmed earnings date is required to verify the IV term structure hump.`,
       };
     }
 
@@ -429,10 +416,10 @@ const filter5: IFilterRule = {
       return {
         name: this.name,
         passed: false,
-        bypassed: true,
+        bypassed: false,
         calculatedValue: `Estimated date: ${stock.nextEarningsDate}`,
         threshold: FILTER5_THRESHOLD,
-        explanation: `${stock.symbol}'s earnings date (${stock.nextEarningsDate}) is estimated, not confirmed. Cannot reliably verify the entry window — filter bypassed.`,
+        explanation: `${stock.symbol}'s earnings date (${stock.nextEarningsDate}) is estimated, not exchange-confirmed. Estimated dates are unreliable for precise entry timing — confirm the date before entry.`,
       };
     }
 
@@ -465,16 +452,34 @@ const filter5: IFilterRule = {
 
     // --- Part B: IV term structure hump ---
 
-    const termStructure = stock.liquidityMetrics?.ivTermStructure ?? null;
+    // Weekly options are required to execute the double-calendar spread strategy.
+    // If options data is absent or the chain has no weekly options, this filter fails
+    // for the same reason as Filter 3.
+    if (!stock.liquidityMetrics || !stock.liquidityMetrics.hasWeeklyOptions) {
+      return {
+        name: this.name,
+        passed: false,
+        bypassed: false,
+        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — no weekly options`,
+        threshold: FILTER5_THRESHOLD,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but ${
+          !stock.liquidityMetrics
+            ? "options data is unavailable"
+            : "this chain has no weekly options"
+        }. The double-calendar spread requires weekly options (same reason Filter 3 fails).`,
+      };
+    }
+
+    const termStructure = stock.liquidityMetrics.ivTermStructure ?? null;
 
     if (!termStructure || termStructure.length < 3) {
       return {
         name: this.name,
         passed: false,
-        bypassed: true,
+        bypassed: false,
         calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — IV term structure unavailable`,
         threshold: FILTER5_THRESHOLD,
-        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but IV term structure data is unavailable or insufficient. Verify the IV hump manually before entry.`,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but IV term structure data is unavailable or insufficient (fewer than 3 near-term expirations). Cannot confirm the IV hump.`,
       };
     }
 
@@ -486,10 +491,10 @@ const filter5: IFilterRule = {
       return {
         name: this.name,
         passed: false,
-        bypassed: true,
-        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — insufficient adjacent expirations`,
+        bypassed: false,
+        calculatedValue: `${daysUntil}d (${stock.nextEarningsDate}, confirmed) — no adjacent expirations around earnings week`,
         threshold: FILTER5_THRESHOLD,
-        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but the IV term structure lacks adjacent expirations around the earnings week to confirm a hump. Verify manually.`,
+        explanation: `${stock.symbol} reports in ${daysUntil} days (confirmed) — in the entry window — but the IV term structure has no expirations on both sides of the earnings week. Cannot confirm the IV hump.`,
       };
     }
 
@@ -644,29 +649,19 @@ export class ScreeningEngine {
   evaluateStock(stock: StockQuote, today?: Date): ScreeningResult {
     const filterResults = this.rules.map((rule) => rule.evaluate(stock, today));
 
-    // Count: genuinely passed, bypassed (missing data), and failed (not passed & not bypassed)
-    const genuinePassed = filterResults.filter(r =>  r.passed && !r.bypassed).length;
-    const bypassed      = filterResults.filter(r => !r.passed &&  r.bypassed).length;
-    const genuineFailed = filterResults.filter(r => !r.passed && !r.bypassed).length;
-    const total         = this.rules.length;
+    const passed = filterResults.filter(r => r.passed).length;
+    const total  = this.rules.length;
 
-    // filterScore counts both genuine passes and bypasses so stale data doesn't
-    // penalise the ranking of an otherwise clean stock.
-    const filterScore = total > 0
-      ? Math.round(((genuinePassed + bypassed) / total) * 100)
-      : 0;
+    // filterScore: percentage of filters that passed. Any failure reduces the score.
+    const filterScore = total > 0 ? Math.round((passed / total) * 100) : 0;
 
-    // qualified: every filter genuinely passed — no bypasses, no failures.
-    const qualified = genuinePassed === total;
+    // qualified: every filter passed — no failures.
+    const qualified = passed === total;
 
-    // qualifiedWithCaveats: no filter failed, but at least one was bypassed.
-    const qualifiedWithCaveats = genuineFailed === 0 && bypassed > 0;
+    // qualifiedWithCaveats is always false; kept for API compatibility only.
+    const qualifiedWithCaveats = false;
 
-    const status: ScreeningResult["status"] = qualified
-      ? "qualified"
-      : qualifiedWithCaveats
-      ? "qualified_with_caveats"
-      : "not_qualified";
+    const status: ScreeningResult["status"] = qualified ? "qualified" : "not_qualified";
 
     return {
       symbol: stock.symbol,

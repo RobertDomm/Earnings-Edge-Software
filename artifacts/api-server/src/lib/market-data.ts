@@ -3368,7 +3368,20 @@ export class ThetaDataProvider implements IMarketDataProvider {
 // ---------------------------------------------------------------------------
 
 export function createMarketDataProvider(): IMarketDataProvider {
-  const mode = process.env.MARKET_DATA_PROVIDER ?? "mock";
+  const mode = process.env.MARKET_DATA_PROVIDER;
+
+  if (!mode) {
+    throw new Error(
+      "MARKET_DATA_PROVIDER is not set. " +
+      "Set it to 'thetadata' or 'live' in Replit Secrets. " +
+      "For local development with deterministic mock data, set MARKET_DATA_PROVIDER=mock explicitly."
+    );
+  }
+
+  if (mode === "mock") {
+    console.warn("[MarketData] MARKET_DATA_PROVIDER=mock — serving mock data. Do not use in production.");
+    return new MockMarketDataProvider();
+  }
 
   if (mode === "thetadata") {
     const apiKey = process.env.THETADATA_API_KEY;
@@ -3383,7 +3396,7 @@ export function createMarketDataProvider(): IMarketDataProvider {
     if (!polygonApiKey) {
       console.warn(
         "[ThetaDataProvider] MARKET_DATA_API_KEY not set — earnings data unavailable. " +
-        "Filters 2, 4, and 5 will be bypassed. Set MARKET_DATA_API_KEY to a Polygon.io key to enable them."
+        "Filters 2, 4, and 5 will fail for all stocks. Set MARKET_DATA_API_KEY to a Polygon.io key to enable them."
       );
     }
     // Same knob as live mode: POLYGON_REQUESTS_PER_MINUTE (default 100,
@@ -3419,7 +3432,9 @@ export function createMarketDataProvider(): IMarketDataProvider {
     );
   }
 
-  return new MockMarketDataProvider();
+  throw new Error(
+    `MARKET_DATA_PROVIDER="${mode}" is not recognised. Valid values: 'thetadata', 'live', 'mock' (dev only).`
+  );
 }
 // NOTE: No singleton is exported here — the single shared instance is created
 // by services.ts.  Importing createMarketDataProvider directly avoids

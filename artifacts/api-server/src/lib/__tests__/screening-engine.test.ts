@@ -341,21 +341,20 @@ describe("Filter 2 — Earnings in 2 Weeks: boundary cases", () => {
     assert.equal(result.passed, false, "unknown source must not count as confirmed");
   });
 
-  it("is bypassed (passed=false, bypassed=true) when nextEarningsDate is null — data provider has no earnings calendar", () => {
-    // When the data provider cannot supply an earnings date (e.g. ThetaData), the filter
-    // is bypassed — neither passed nor failed — so the stock surfaces as qualified_with_caveats.
+  it("fails (passed=false, bypassed=false) when nextEarningsDate is null — no earnings date to verify", () => {
     const stock = baseStock({ nextEarningsDate: null });
     const result = filter2.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false, "null earnings date must not count as passed");
-    assert.equal(result.bypassed, true,  "null earnings date must set bypassed=true");
+    assert.equal(result.bypassed, false, "null earnings date is a genuine failure, not a bypass");
     assert.ok(
       result.calculatedValue.toLowerCase().includes("no earnings"),
       `calculatedValue must indicate no date (got: "${result.calculatedValue}")`
     );
     assert.ok(
-      result.explanation.toLowerCase().includes("bypass") ||
-        result.explanation.toLowerCase().includes("unavailable"),
-      `explanation must mention bypass or unavailability (got: "${result.explanation}")`
+      result.explanation.toLowerCase().includes("required") ||
+        result.explanation.toLowerCase().includes("unavailable") ||
+        result.explanation.toLowerCase().includes("available"),
+      `explanation must state what is required (got: "${result.explanation}")`
     );
   });
 
@@ -566,17 +565,16 @@ describe("Filter 4 — IV Rise into Earnings: core pass/fail logic", () => {
     );
   });
 
-  it("is bypassed (passed=false, bypassed=true) when earningsIvHistory is null — data provider has no historical IV", () => {
-    // When the data provider cannot supply historical IV data (e.g. ThetaData), the filter
-    // is bypassed — neither passed nor failed — so the stock surfaces as qualified_with_caveats.
+  it("fails (passed=false, bypassed=false) when earningsIvHistory is null — no IV history to verify", () => {
     const stock = baseStock({ earningsIvHistory: null });
     const result = filter4.evaluate(stock);
     assert.equal(result.passed,   false, "null earningsIvHistory must not count as passed");
-    assert.equal(result.bypassed, true,  "null earningsIvHistory must set bypassed=true");
+    assert.equal(result.bypassed, false, "null earningsIvHistory is a genuine failure, not a bypass");
     assert.ok(
-      result.explanation.toLowerCase().includes("bypass") ||
-        result.explanation.toLowerCase().includes("unavailable"),
-      `explanation must mention bypass or unavailability (got: "${result.explanation}")`
+      result.explanation.toLowerCase().includes("required") ||
+        result.explanation.toLowerCase().includes("available") ||
+        result.explanation.toLowerCase().includes("cycles"),
+      `explanation must state what is required (got: "${result.explanation}")`
     );
   });
 });
@@ -667,28 +665,28 @@ function f5PassingStock(overrides: Partial<StockQuote> = {}): StockQuote {
 }
 
 describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part A — confirmed window", () => {
-  it("bypasses when nextEarningsDate is null (data provider has no earnings calendar)", () => {
+  it("fails (bypassed=false) when nextEarningsDate is null — no earnings date to verify", () => {
     const stock = baseStock({ nextEarningsDate: null });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false, "null earnings date must not count as passed");
-    assert.equal(result.bypassed, true,  "null earnings date must set bypassed=true");
+    assert.equal(result.bypassed, false, "null earnings date is a genuine failure, not a bypass");
     assert.ok(
       result.calculatedValue.toLowerCase().includes("no") ||
         result.calculatedValue.toLowerCase().includes("confirmed"),
       `calculatedValue must indicate no earnings date (got: "${result.calculatedValue}")`
     );
     assert.ok(
-      result.explanation.toLowerCase().includes("bypass") ||
-        result.explanation.toLowerCase().includes("unavailable"),
-      `explanation must mention bypass or unavailability (got: "${result.explanation}")`
+      result.explanation.toLowerCase().includes("required") ||
+        result.explanation.toLowerCase().includes("available"),
+      `explanation must state what is required (got: "${result.explanation}")`
     );
   });
 
-  it("bypasses when earningsDateSource is 'estimated' (estimated dates are too uncertain to act on)", () => {
+  it("fails (bypassed=false) when earningsDateSource is 'estimated' — estimated dates are not actionable", () => {
     const stock = baseStock({ nextEarningsDate: dateFromFixed(16), earningsDateSource: "estimated" });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false, "estimated date must not pass");
-    assert.equal(result.bypassed, true,  "estimated date must bypass — entry window cannot be trusted");
+    assert.equal(result.bypassed, false, "estimated date is a genuine failure — cannot be traded on");
     assert.ok(
       result.calculatedValue.toLowerCase().includes("estimated") ||
         result.explanation.toLowerCase().includes("estimated"),
@@ -696,11 +694,11 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part A — con
     );
   });
 
-  it("bypasses when earningsDateSource is missing (legacy provider predating the field)", () => {
+  it("fails (bypassed=false) when earningsDateSource is missing — no source means not confirmed", () => {
     const stock = baseStock({ nextEarningsDate: dateFromFixed(16) }); // no earningsDateSource
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "unknown/missing source must bypass — cannot verify confirmation status");
+    assert.equal(result.bypassed, false, "unknown/missing source is a genuine failure — not confirmed");
   });
 
   it("fails (bypassed=false) when confirmed earnings are 13 days out — window has closed", () => {
@@ -729,7 +727,7 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part A — con
 });
 
 describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV hump", () => {
-  it("bypasses when liquidityMetrics is null (no options data — hump cannot be evaluated)", () => {
+  it("fails (bypassed=false) when liquidityMetrics is null — no options data means no weekly options", () => {
     const stock = baseStock({
       nextEarningsDate: dateFromFixed(16),
       earningsDateSource: "confirmed",
@@ -737,17 +735,34 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV 
     });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "null liquidityMetrics must bypass the hump check");
+    assert.equal(result.bypassed, false, "null liquidityMetrics is a genuine failure — no weekly options data");
+    assert.ok(
+      result.explanation.toLowerCase().includes("weekly") || result.explanation.toLowerCase().includes("options"),
+      `explanation must mention weekly/options (got: "${result.explanation}")`
+    );
   });
 
-  it("bypasses when ivTermStructure is null (options present but no per-expiration IV data)", () => {
+  it("fails (bypassed=false) when hasWeeklyOptions is false — strategy requires weekly options", () => {
+    const stock = f5PassingStock({
+      liquidityMetrics: { ...metricsWithIv(null), hasWeeklyOptions: false },
+    });
+    const result = filter5.evaluate(stock, FIXED_TODAY);
+    assert.equal(result.passed,   false, "no weekly options must fail");
+    assert.equal(result.bypassed, false, "no weekly options is a genuine failure, same reason as Filter 3");
+    assert.ok(
+      result.explanation.toLowerCase().includes("weekly"),
+      `explanation must mention weekly options (got: "${result.explanation}")`
+    );
+  });
+
+  it("fails (bypassed=false) when ivTermStructure is null (options present but no per-expiration IV data)", () => {
     const stock = f5PassingStock({ liquidityMetrics: metricsWithIv(null) });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "null ivTermStructure must bypass — cannot evaluate hump");
+    assert.equal(result.bypassed, false, "null ivTermStructure is a genuine failure — hump cannot be confirmed");
   });
 
-  it("bypasses when ivTermStructure has fewer than 3 entries", () => {
+  it("fails (bypassed=false) when ivTermStructure has fewer than 3 entries", () => {
     const earningsDte = 16;
     const stock = f5PassingStock({
       liquidityMetrics: metricsWithIv([
@@ -758,10 +773,10 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV 
     });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "< 3 entries must bypass — no adjacent expirations to compare");
+    assert.equal(result.bypassed, false, "< 3 entries is a genuine failure — no adjacent expirations to compare");
   });
 
-  it("bypasses when no expiration in the term structure is on or after the earnings date", () => {
+  it("fails (bypassed=false) when no expiration in the term structure is on or after the earnings date", () => {
     const earningsDte = 16;
     const stock = f5PassingStock({
       liquidityMetrics: metricsWithIv([
@@ -772,10 +787,10 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV 
     });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "must bypass when no expiration covers the earnings date");
+    assert.equal(result.bypassed, false, "no expiration covering earnings date is a genuine failure");
   });
 
-  it("bypasses when the earnings expiration is index 0 (no prior expiration to compare)", () => {
+  it("fails (bypassed=false) when the earnings expiration is index 0 (no prior expiration to compare)", () => {
     const earningsDte = 16;
     const stock = f5PassingStock({
       liquidityMetrics: metricsWithIv([
@@ -786,10 +801,10 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV 
     });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "must bypass when earnings expiration has no prior week");
+    assert.equal(result.bypassed, false, "earnings expiration with no prior week is a genuine failure");
   });
 
-  it("bypasses when the earnings expiration is the last entry (no following expiration to compare)", () => {
+  it("fails (bypassed=false) when the earnings expiration is the last entry (no following expiration to compare)", () => {
     const earningsDte = 16;
     const stock = f5PassingStock({
       liquidityMetrics: metricsWithIv([
@@ -800,7 +815,7 @@ describe("Filter 5 — IV Term Structure Confirms Earnings Event: Part B — IV 
     });
     const result = filter5.evaluate(stock, FIXED_TODAY);
     assert.equal(result.passed,   false);
-    assert.equal(result.bypassed, true, "must bypass when earnings expiration has no following week");
+    assert.equal(result.bypassed, false, "earnings expiration with no following week is a genuine failure");
   });
 
   it("passes when confirmed, in window, and IV clearly humps at the earnings-week expiration", () => {

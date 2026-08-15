@@ -362,53 +362,60 @@ function makeThetaDataStock(overrides: Partial<StockQuote> = {}): StockQuote {
   };
 }
 
-describe("ThetaData pipeline: qualified_with_caveats when only earnings data is absent", () => {
+describe("ThetaData pipeline: not_qualified when earnings data is absent (filters 2, 4, 5 fail)", () => {
   const engine = new ScreeningEngine();
 
-  it("META with ThetaData-shaped data gets status=qualified_with_caveats (not not_qualified)", () => {
+  it("META with ThetaData-shaped data (no earnings/IV history) gets status=not_qualified with filterScore=50", () => {
+    // Filters 1, 3, 6 pass; Filters 2, 4, 5 fail (no confirmed earnings date or IV history).
     const stock = makeThetaDataStock();
     const result = engine.evaluateStock(stock);
 
     assert.equal(
       result.status,
-      "qualified_with_caveats",
-      `Expected qualified_with_caveats — Filters 1/3/6 pass, 2/4/5 are bypassed. Got: ${result.status}`
+      "not_qualified",
+      `Expected not_qualified — Filters 2/4/5 fail without earnings data. Got: ${result.status}`
     );
-    assert.equal(result.qualified,            false, "qualified must be false when any filter is bypassed");
-    assert.equal(result.qualifiedWithCaveats, true,  "qualifiedWithCaveats must be true when no filter failed");
-    assert.equal(result.filterScore,          100,   "filterScore must be 100 when every filter passed or was bypassed");
+    assert.equal(result.qualified,            false, "qualified must be false when any filter fails");
+    assert.equal(result.qualifiedWithCaveats, false, "qualifiedWithCaveats is always false");
+    // 3 passes (F1, F3, F6) out of 6 = 50
+    assert.equal(result.filterScore, 50, `filterScore must be 50 (3/6 pass); got ${result.filterScore}`);
   });
 
-  it("Filter 2 is bypassed (not failed) when nextEarningsDate is null", () => {
+  it("Filter 2 fails (bypassed=false) when nextEarningsDate is null — no earnings date to verify", () => {
     const result = engine.evaluateStock(makeThetaDataStock());
     const f2 = result.filterResults[1];
-    assert.equal(f2.passed,   false, "bypassed filter must have passed=false");
-    assert.equal(f2.bypassed, true,  "bypassed filter must have bypassed=true");
+    assert.equal(f2.passed,   false, "failed filter must have passed=false");
+    assert.equal(f2.bypassed, false, "null earnings date is a genuine failure, not a bypass");
     assert.ok(
-      f2.explanation.toLowerCase().includes("bypass"),
-      `Filter 2 explanation must mention bypass (got: "${f2.explanation}")`
+      f2.explanation.toLowerCase().includes("required") ||
+        f2.explanation.toLowerCase().includes("available"),
+      `Filter 2 explanation must state what is required (got: "${f2.explanation}")`
     );
   });
 
-  it("Filter 4 is bypassed (not failed) when earningsIvHistory is null", () => {
+  it("Filter 4 fails (bypassed=false) when earningsIvHistory is null — no IV history to verify", () => {
     const result = engine.evaluateStock(makeThetaDataStock());
     const f4 = result.filterResults[3];
-    assert.equal(f4.passed,   false, "bypassed filter must have passed=false");
-    assert.equal(f4.bypassed, true,  "bypassed filter must have bypassed=true");
+    assert.equal(f4.passed,   false, "failed filter must have passed=false");
+    assert.equal(f4.bypassed, false, "null IV history is a genuine failure, not a bypass");
     assert.ok(
-      f4.explanation.toLowerCase().includes("bypass"),
-      `Filter 4 explanation must mention bypass (got: "${f4.explanation}")`
+      f4.explanation.toLowerCase().includes("required") ||
+        f4.explanation.toLowerCase().includes("available") ||
+        f4.explanation.toLowerCase().includes("cycles"),
+      `Filter 4 explanation must state what is required (got: "${f4.explanation}")`
     );
   });
 
-  it("Filter 5 is bypassed (not failed) when nextEarningsDate is null", () => {
+  it("Filter 5 fails (bypassed=false) when nextEarningsDate is null — no confirmed earnings date", () => {
     const result = engine.evaluateStock(makeThetaDataStock());
     const f5 = result.filterResults[4];
-    assert.equal(f5.passed,   false, "bypassed filter must have passed=false");
-    assert.equal(f5.bypassed, true,  "bypassed filter must have bypassed=true");
+    assert.equal(f5.passed,   false, "failed filter must have passed=false");
+    assert.equal(f5.bypassed, false, "null earnings date in F5 is a genuine failure, not a bypass");
     assert.ok(
-      f5.explanation.toLowerCase().includes("bypass"),
-      `Filter 5 explanation must mention bypass (got: "${f5.explanation}")`
+      f5.explanation.toLowerCase().includes("required") ||
+        f5.explanation.toLowerCase().includes("available") ||
+        f5.explanation.toLowerCase().includes("confirmed"),
+      `Filter 5 explanation must state what is required (got: "${f5.explanation}")`
     );
   });
 
@@ -1226,40 +1233,40 @@ describe("ThetaData + Polygon mode: Filters 2, 4, 5 not bypassed when earnings d
 // ---------------------------------------------------------------------------
 // Graceful degradation: when polygonApiKey is null (MARKET_DATA_API_KEY not
 // set), ThetaDataProvider leaves nextEarningsDate and earningsIvHistory as
-// null.  Filters 2, 4, 5 must continue to bypass rather than crash.
+// null.  Filters 2, 4, 5 must fail gracefully (not crash).
 // ---------------------------------------------------------------------------
 
-describe("Graceful degradation: null polygonApiKey → Filters 2, 4, 5 still bypass (no crash)", () => {
+describe("Graceful degradation: null polygonApiKey → Filters 2, 4, 5 fail (not crash)", () => {
   const engine = new ScreeningEngine();
 
-  it("Filter 2 is bypassed (not failed) when nextEarningsDate is null (no Polygon key)", () => {
+  it("Filter 2 fails (bypassed=false) when nextEarningsDate is null (no Polygon key)", () => {
     // makeThetaDataStock() produces null nextEarningsDate — models polygonApiKey:null
     const result = engine.evaluateStock(makeThetaDataStock({ nextEarningsDate: null }));
     const f2 = result.filterResults[1];
-    assert.equal(f2.bypassed, true,  "Filter 2 must be bypassed when nextEarningsDate is null");
-    assert.equal(f2.passed,   false, "bypassed filter must have passed:false");
+    assert.equal(f2.bypassed, false, "null earnings date is a genuine failure, not a bypass");
+    assert.equal(f2.passed,   false, "failed filter must have passed:false");
   });
 
-  it("Filter 4 is bypassed (not failed) when earningsIvHistory is null (no Polygon key)", () => {
+  it("Filter 4 fails (bypassed=false) when earningsIvHistory is null (no Polygon key)", () => {
     const result = engine.evaluateStock(makeThetaDataStock({ earningsIvHistory: null }));
     const f4 = result.filterResults[3];
-    assert.equal(f4.bypassed, true,  "Filter 4 must be bypassed when earningsIvHistory is null");
-    assert.equal(f4.passed,   false, "bypassed filter must have passed:false");
+    assert.equal(f4.bypassed, false, "null IV history is a genuine failure, not a bypass");
+    assert.equal(f4.passed,   false, "failed filter must have passed:false");
   });
 
-  it("Filter 5 is bypassed (not failed) when nextEarningsDate is null (no Polygon key)", () => {
+  it("Filter 5 fails (bypassed=false) when nextEarningsDate is null (no Polygon key)", () => {
     const result = engine.evaluateStock(makeThetaDataStock({ nextEarningsDate: null }));
     const f5 = result.filterResults[4];
-    assert.equal(f5.bypassed, true,  "Filter 5 must be bypassed when nextEarningsDate is null");
-    assert.equal(f5.passed,   false, "bypassed filter must have passed:false");
+    assert.equal(f5.bypassed, false, "null earnings date in F5 is a genuine failure, not a bypass");
+    assert.equal(f5.passed,   false, "failed filter must have passed:false");
   });
 
-  it("status is qualified_with_caveats (not not_qualified) — bypass does not disqualify", () => {
+  it("status is not_qualified when earnings data is absent — missing data is a disqualifying failure", () => {
     const result = engine.evaluateStock(makeThetaDataStock());
     assert.equal(
       result.status,
-      "qualified_with_caveats",
-      `Expected qualified_with_caveats when only earnings data is absent (got: ${result.status})`
+      "not_qualified",
+      `Expected not_qualified when earnings data is absent (got: ${result.status})`
     );
   });
 
@@ -1453,18 +1460,21 @@ describe("ThetaDataProvider.enrichTicker wiring: polygonApiKey propagates to Sto
         `Filter 4 must not be bypassed when earningsIvHistory is non-null ` +
         `(got bypassed=${f4.bypassed}, explanation="${f4.explanation}")`
       );
-      // Filter 5 correctly bypasses: Polygon's extrapolated date is "estimated",
-      // and Filter 5 only evaluates confirmed dates (estimated → bypass).
+      // Filter 5 fails: Polygon's extrapolated date is "estimated",
+      // and Filter 5 requires a confirmed date — estimated → genuine failure (bypassed=false).
       assert.equal(
-        f5.bypassed, true,
-        `Filter 5 must bypass when the earnings date is estimated (not confirmed) ` +
+        f5.bypassed, false,
+        `Filter 5 must fail (not bypass) when the earnings date is estimated ` +
         `(got bypassed=${f5.bypassed}, explanation="${f5.explanation}")`
+      );
+      assert.equal(
+        f5.passed, false,
+        `Filter 5 must not pass when the earnings date is estimated (got: ${f5.explanation})`
       );
       assert.ok(
         f5.explanation.toLowerCase().includes("estimated") ||
-          f5.explanation.toLowerCase().includes("bypass") ||
-          f5.explanation.toLowerCase().includes("unavailable"),
-        `Filter 5 explanation must mention estimated/bypass (got: "${f5.explanation}")`
+          f5.explanation.toLowerCase().includes("confirm"),
+        `Filter 5 explanation must mention estimated/confirm (got: "${f5.explanation}")`
       );
     } finally {
       globalThis.fetch = origFetch;
