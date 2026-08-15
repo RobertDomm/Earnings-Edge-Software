@@ -668,6 +668,8 @@ export const LIVE_STOCK_UNIVERSE: string[] = [
   "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "AMZN", "META", "TSLA",
   // Semiconductors
   "AMD", "INTC", "QCOM", "AVGO", "MU", "AMAT", "LRCX", "KLAC", "TSM",
+  // Enterprise tech / hardware
+  "SNOW", "HPE", "DELL",
   // Finance
   "JPM", "BAC", "GS", "MS", "C", "WFC", "BLK", "SCHW",
   // Healthcare
@@ -703,6 +705,9 @@ const TICKER_NAMES: Record<string, string> = {
   LRCX: "Lam Research Corporation",
   KLAC: "KLA Corporation",
   TSM: "Taiwan Semiconductor Mfg. Co.",
+  SNOW: "Snowflake Inc.",
+  HPE: "Hewlett Packard Enterprise Company",
+  DELL: "Dell Technologies Inc.",
   JPM: "JPMorgan Chase & Co.",
   BAC: "Bank of America Corporation",
   GS: "Goldman Sachs Group, Inc.",
@@ -760,6 +765,8 @@ const TICKER_SECTORS: Record<string, string> = {
   // Semiconductors
   AMD: "tech", INTC: "tech", QCOM: "tech", AVGO: "tech", MU: "tech",
   AMAT: "tech", LRCX: "tech", KLAC: "tech", TSM: "tech",
+  // Enterprise tech / hardware
+  SNOW: "tech", HPE: "tech", DELL: "tech",
   // Finance
   JPM: "finance", BAC: "finance", GS: "finance", MS: "finance",
   C: "finance", WFC: "finance", BLK: "finance", SCHW: "finance",
