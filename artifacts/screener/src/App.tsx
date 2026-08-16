@@ -11,8 +11,6 @@ import AccessRestricted from '@/pages/access-restricted';
 import CustomSignInPage from '@/pages/custom-sign-in';
 import { useTheme } from '@/hooks/use-theme';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { useColorblind } from '@/hooks/use-colorblind';
-import { ColorblindToggle } from '@/components/colorblind-toggle';
 
 import {
   Route,
@@ -158,13 +156,11 @@ function ClerkProviderWithRoutes() {
 
 function App() {
   const { theme, toggleTheme } = useTheme();
-  const { colorblind, toggleColorblind } = useColorblind();
 
   return (
     <WouterRouter base={basePath}>
       <ClerkProviderWithRoutes />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
-      <ColorblindToggle colorblind={colorblind} onToggle={toggleColorblind} />
     </WouterRouter>
   );
 }

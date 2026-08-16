@@ -155,36 +155,6 @@
   --status-down-fg: 0 94% 82%;      /* red-300 — badge text */
 }
 
-/* ─── Colorblind-friendly palette: blue (up) / orange (down) ──────────────────
-   Applied by toggling the `colorblind` class on <html>.
-   Works on top of both :root (light) and .dark, because the selectors below
-   have higher specificity than the plain :root / .dark blocks above.
-   ──────────────────────────────────────────────────────────────────────────── */
-
-/* Light + colorblind */
-:root.colorblind {
-  --status-up: 210 100% 38%;        /* blue-700 */
-  --status-up-muted: 210 100% 38%;
-  --status-up-subtle: 210 100% 92%; /* blue-100 — badge background */
-  --status-up-fg: 210 100% 24%;     /* blue-900 — badge text */
-  --status-down: 25 95% 44%;        /* orange-600 */
-  --status-down-muted: 25 90% 38%;  /* orange-700 */
-  --status-down-subtle: 30 100% 91%;/* orange-100 — badge background */
-  --status-down-fg: 25 90% 28%;     /* orange-900 — badge text */
-}
-
-/* Dark + colorblind */
-:root.colorblind.dark {
-  --status-up: 213 94% 68%;         /* blue-400 */
-  --status-up-muted: 213 94% 68%;
-  --status-up-subtle: 210 100% 19%; /* blue-900 — badge background */
-  --status-up-fg: 210 100% 78%;     /* blue-300 — badge text */
-  --status-down: 30 100% 60%;       /* orange-400 */
-  --status-down-muted: 28 95% 54%;  /* orange-500 */
-  --status-down-subtle: 25 95% 23%; /* orange-900 — badge background */
-  --status-down-fg: 30 100% 74%;    /* orange-300 — badge text */
-}
-
 @layer base {
   * {
     @apply border-border;
