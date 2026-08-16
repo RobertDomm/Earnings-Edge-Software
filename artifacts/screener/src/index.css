@@ -4,14 +4,14 @@
 @plugin "@tailwindcss/typography";
 
 @keyframes flash-up {
-  0%   { background-color: rgb(52 211 153 / 0.25); }
-  60%  { background-color: rgb(52 211 153 / 0.18); }
+  0%   { background-color: color-mix(in srgb, var(--color-up) 25%, transparent); }
+  60%  { background-color: color-mix(in srgb, var(--color-up) 18%, transparent); }
   100% { background-color: transparent; }
 }
 
 @keyframes flash-down {
-  0%   { background-color: rgb(239 68 68 / 0.25); }
-  60%  { background-color: rgb(239 68 68 / 0.18); }
+  0%   { background-color: color-mix(in srgb, var(--color-down) 25%, transparent); }
+  60%  { background-color: color-mix(in srgb, var(--color-down) 18%, transparent); }
   100% { background-color: transparent; }
 }
 
