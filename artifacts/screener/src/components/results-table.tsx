@@ -149,7 +149,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search symbol or company..."
-            className="pl-9 rounded-none font-mono text-xs border-border bg-card dark:bg-black/40 text-card-foreground placeholder:text-card-foreground/60 h-9"
+            className="pl-9 rounded-lg dark:rounded-none font-mono text-xs border-border bg-card dark:bg-black/40 text-card-foreground placeholder:text-card-foreground/60 h-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -159,7 +159,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
             value={statusFilter}
             onValueChange={(v: "all" | "pass" | "partial") => setStatusFilter(v)}
           >
-            <SelectTrigger className="rounded-none font-mono text-xs border-border bg-card dark:bg-black/40 text-card-foreground h-9">
+            <SelectTrigger className="rounded-lg dark:rounded-none font-mono text-xs border-border bg-card dark:bg-black/40 text-card-foreground h-9">
               <SelectValue placeholder="Filter Status" />
             </SelectTrigger>
             <SelectContent className="rounded-none border-border">
@@ -171,7 +171,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
         </div>
       </div>
 
-      <div className="border border-border bg-muted/20 dark:bg-black/20 overflow-hidden flex-1 relative">
+      <div className="border border-border bg-muted/20 dark:bg-black/20 rounded-xl dark:rounded-none shadow-md shadow-black/10 dark:shadow-none overflow-hidden flex-1 relative">
         <div className="overflow-auto max-h-[800px]">
           <Table className="w-full text-sm">
             <TableHeader className="sticky top-0 z-10 border-b border-border shadow-sm">
