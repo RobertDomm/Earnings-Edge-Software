@@ -118,7 +118,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
 
   const renderSortableHeader = (label: string, key: SortKey, align: "left" | "center" = "left") => (
     <TableHead
-      className="cursor-pointer group select-none whitespace-nowrap text-xs font-mono font-normal uppercase tracking-wider h-10 px-3 py-2 bg-muted/30"
+      className="cursor-pointer group select-none whitespace-nowrap text-xs font-mono font-normal uppercase tracking-wider h-10 px-3 py-2 bg-card text-card-foreground dark:bg-muted/30 dark:text-muted-foreground"
       onClick={() => handleSort(key)}
     >
       <div className={`flex items-center${align === "center" ? " justify-center" : ""}`}>
@@ -132,7 +132,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
     <TableHead
       key={index}
       title={filterNames[index] ?? `Filter ${index + 1}`}
-      className="text-center text-xs font-mono font-normal uppercase tracking-wider h-10 px-2 py-2 bg-muted/30 select-none w-10"
+      className="text-center text-xs font-mono font-normal uppercase tracking-wider h-10 px-2 py-2 bg-card text-card-foreground dark:bg-muted/30 dark:text-muted-foreground select-none w-10"
     >
       {FILTER_SHORT_LABELS[index]}
     </TableHead>
@@ -171,7 +171,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
         </div>
       </div>
 
-      <div className="border border-border bg-card dark:bg-black/20 overflow-hidden flex-1 relative">
+      <div className="border border-border bg-muted/20 dark:bg-black/20 overflow-hidden flex-1 relative">
         <div className="overflow-auto max-h-[800px]">
           <Table className="w-full text-sm">
             <TableHeader className="sticky top-0 z-10 border-b border-border shadow-sm">
