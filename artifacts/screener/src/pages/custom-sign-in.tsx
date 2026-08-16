@@ -344,7 +344,7 @@ export default function CustomSignInPage() {
               <button
                 type="submit"
                 disabled={loading || !email.trim() || !clerkReady}
-                className="w-full bg-primary text-primary-foreground py-2 rounded-md font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                className="w-full bg-blue-950 text-white py-2 rounded-md font-medium text-sm hover:bg-blue-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
               >
                 {loading ? 'Checking…' : <>Continue &rarr;</>}
               </button>
@@ -374,7 +374,7 @@ export default function CustomSignInPage() {
               <button
                 type="submit"
                 disabled={loading || code.length < 6}
-                className="w-full bg-primary text-primary-foreground py-2 rounded-md font-medium text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-blue-950 text-white py-2 rounded-md font-medium text-sm hover:bg-blue-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? 'Verifying…' : 'Verify →'}
               </button>
