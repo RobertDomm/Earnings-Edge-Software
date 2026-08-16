@@ -51,7 +51,7 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'edgefinder-logo.png', 'edgefinder-logo-192.png', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.png', 'ees-hex-logo.png', 'ees-hex-logo-192.png', 'ees-hex-logo-512.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Earnings Edge Software',
         short_name: 'Earnings Edge',
@@ -63,12 +63,12 @@ export default defineConfig({
         start_url: basePath,
         icons: [
           {
-            src: 'edgefinder-logo-192.png',
+            src: 'ees-hex-logo-192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: 'edgefinder-logo.png',
+            src: 'ees-hex-logo-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable',

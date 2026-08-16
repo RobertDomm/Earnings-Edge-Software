@@ -32,9 +32,17 @@ export default function AccessRestricted() {
       <div className="z-10 w-full max-w-md border border-border bg-card p-8 shadow-2xl relative">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-down to-orange-500"></div>
 
+        <div className="mb-6 flex justify-center">
+          <img
+            src="/ees-hex-logo.png"
+            alt="Earnings Edge Software"
+            className="h-14 w-14 object-contain"
+          />
+        </div>
+
         <div className="mb-8 flex justify-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-down/10 border border-down/20 text-down">
-            <ShieldAlert className="h-8 w-8" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-down/10 border border-down/20 text-down">
+            <ShieldAlert className="h-7 w-7" />
           </div>
         </div>
 

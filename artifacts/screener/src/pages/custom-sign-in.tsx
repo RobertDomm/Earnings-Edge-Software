@@ -311,6 +311,12 @@ export default function CustomSignInPage() {
       </div>
 
       <div className="z-10 flex flex-col items-center gap-3 w-full max-w-sm">
+        <img
+          src="/ees-hex-logo.png"
+          alt="Earnings Edge Software"
+          className="h-16 w-16 object-contain"
+        />
+
         <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest text-center">
           Please use your Circle email to verify your authorization
         </p>
