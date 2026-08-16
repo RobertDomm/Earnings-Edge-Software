@@ -42,6 +42,17 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
+  /* Semantic status colors — change values in :root/.dark, not in components */
+  --color-up: hsl(var(--status-up));
+  --color-down: hsl(var(--status-down));
+  --color-up-muted: hsl(var(--status-up-muted));
+  --color-down-muted: hsl(var(--status-down-muted));
+  /* Subtle background + legible foreground for status badges/chips */
+  --color-up-subtle: hsl(var(--status-up-subtle));
+  --color-up-fg: hsl(var(--status-up-fg));
+  --color-down-subtle: hsl(var(--status-down-subtle));
+  --color-down-fg: hsl(var(--status-down-fg));
+
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
   --color-card-border: hsl(var(--card-border));
@@ -98,6 +109,16 @@
   --border: 0 0% 0%;
   --input: 0 0% 0%;
   --ring: 0 0% 0%;
+
+  /* Status palette (light) */
+  --status-up: 161 94% 30%;         /* emerald-700 */
+  --status-up-muted: 161 94% 30%;
+  --status-up-subtle: 152 81% 90%;  /* emerald-100 — badge background */
+  --status-up-fg: 161 88% 20%;      /* emerald-800 — badge text */
+  --status-down: 0 72% 51%;         /* red-600 */
+  --status-down-muted: 0 74% 42%;   /* red-700 — for icons */
+  --status-down-subtle: 0 93% 94%;  /* red-100 — badge background */
+  --status-down-fg: 0 66% 35%;      /* red-800 — badge text */
 }
 
 .dark {
@@ -122,6 +143,16 @@
   --border: 240 5% 16%;
   --input: 240 5% 16%;
   --ring: 240 4.9% 83.9%;
+
+  /* Status palette (dark) */
+  --status-up: 160 84% 39%;         /* emerald-500 */
+  --status-up-muted: 160 84% 39%;
+  --status-up-subtle: 161 94% 17%;  /* emerald-900 — badge background */
+  --status-up-fg: 152 76% 66%;      /* emerald-300 — badge text */
+  --status-down: 0 84% 60%;         /* red-500 */
+  --status-down-muted: 0 72% 55%;   /* softer red — approximates red-500/70 on dark bg */
+  --status-down-subtle: 0 63% 31%;  /* red-900 — badge background */
+  --status-down-fg: 0 94% 82%;      /* red-300 — badge text */
 }
 
 @layer base {

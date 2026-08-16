@@ -200,7 +200,7 @@ export function ScannerStatusWidget({
                   </span>
                   <span>
                     Passed:{" "}
-                    <span className="text-emerald-700 dark:text-emerald-500">
+                    <span className="text-up">
                       {formatCompactNumber(
                         scannerState.lastScan.totalQualified
                       )}

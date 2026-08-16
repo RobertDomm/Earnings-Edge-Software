@@ -34,7 +34,7 @@ export function EarningsSourceBadge({
       }
       className={`inline-flex items-center font-mono text-[9px] uppercase tracking-wider px-1 py-0 border leading-tight ${
         confirmed
-          ? "border-emerald-600/40 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-400"
+          ? "border-up/40 bg-up/10 text-up"
           : "border-amber-600/40 bg-amber-50 text-amber-700 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-400"
       }`}
     >
@@ -236,8 +236,8 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                             key={flash.animKey}
                             className={`delta-badge absolute left-full top-1/2 -translate-y-1/2 ml-1 z-20 text-[10px] font-mono font-semibold px-1 py-0 leading-tight rounded-sm whitespace-nowrap pointer-events-none ${
                               flash.direction === "up"
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300"
-                                : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
+                                ? "bg-up-subtle text-up-fg"
+                                : "bg-down-subtle text-down-fg"
                             }`}
                           >
                             {flash.delta >= 0 ? "+" : ""}
@@ -252,9 +252,9 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                       <TableCell
                         className={`font-mono text-right px-3 py-2.5 ${
                           stock.dailyChangePercent > 0
-                            ? "text-emerald-700 dark:text-emerald-500"
+                            ? "text-up"
                             : stock.dailyChangePercent < 0
-                            ? "text-red-600 dark:text-red-500"
+                            ? "text-down"
                             : ""
                         }`}
                       >
@@ -287,9 +287,9 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                             title={tooltip}
                           >
                             {passed ? (
-                              <CheckCircle2 className="h-4 w-4 text-emerald-700 dark:text-emerald-500 mx-auto" />
+                              <CheckCircle2 className="h-4 w-4 text-up-muted mx-auto" />
                             ) : (
-                              <XCircle className="h-4 w-4 text-red-700 dark:text-red-500/70 mx-auto" />
+                              <XCircle className="h-4 w-4 text-down-muted mx-auto" />
                             )}
                           </TableCell>
                         );

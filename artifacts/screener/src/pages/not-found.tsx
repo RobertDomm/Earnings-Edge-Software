@@ -12,7 +12,7 @@ export default function NotFound() {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
       </div>
       <Card className="w-full max-w-md border-border bg-muted/40 dark:bg-black/40 shadow-none backdrop-blur z-10 rounded-none relative">
-        <div className="absolute top-0 left-0 w-full h-1 bg-red-500/50" />
+        <div className="absolute top-0 left-0 w-full h-1 bg-down/50" />
         <CardContent className="p-8 flex flex-col items-center text-center">
           <Terminal className="h-12 w-12 text-muted-foreground mb-6 opacity-50" />
           

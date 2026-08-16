@@ -39,7 +39,7 @@ function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-background p-6">
       <div className="max-w-lg w-full text-center border border-border bg-card p-8 rounded-none relative">
-        <div className="absolute top-0 left-0 w-full h-1 bg-red-500" />
+        <div className="absolute top-0 left-0 w-full h-1 bg-down" />
         <h1 className="text-lg font-mono font-bold tracking-widest text-foreground uppercase mb-2">
           Component Error
         </h1>
@@ -47,7 +47,7 @@ function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
           A runtime exception occurred in the rendering pipeline.
         </p>
         {import.meta.env.DEV ? (
-          <pre className="mt-6 overflow-x-auto border border-border/50 bg-muted/40 dark:bg-black/40 p-4 text-left text-xs font-mono text-red-600 dark:text-red-400">
+          <pre className="mt-6 overflow-x-auto border border-border/50 bg-muted/40 dark:bg-black/40 p-4 text-left text-xs font-mono text-down">
             {error.message || String(error)}
           </pre>
         ) : null}

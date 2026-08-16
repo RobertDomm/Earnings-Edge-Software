@@ -1,31 +1,29 @@
 /**
  * WCAG AA contrast tests for status badges and delta badges.
  *
- * Both badge types now use opaque backgrounds, so contrast is independent
- * of the parent container (results table bg-black/20, market-status widget
- * bg-black/40, etc.).  Each test checks text colour directly against the
- * badge's own background colour and asserts ≥ 4.5:1 (WCAG AA).
+ * Colour values are derived from the CSS custom-property palette defined in
+ * index.css — specifically the --status-* HSL variables that back
+ * --color-up-subtle, --color-up-fg, --color-down-subtle, --color-down-fg.
  *
- * Colour sources
- * ──────────────
- * Delta badge (results-table.tsx):
- *   up   light  bg-emerald-100  text-emerald-800
- *   up   dark   dark:bg-emerald-900  dark:text-emerald-300
- *   down light  bg-red-100      text-red-800
- *   down dark   dark:bg-red-900      dark:text-red-300
+ * If you change a token value in index.css, update the matching constant here.
  *
- * Status badge (badge.tsx):
- *   success  light  bg-emerald-100  text-emerald-800
- *   success  dark   dark:bg-emerald-900  dark:text-emerald-300
- *   danger   light  bg-red-100      text-red-800
- *   danger   dark   dark:bg-red-900      dark:text-red-300
+ * Token → Tailwind approximate equivalents
+ * ─────────────────────────────────────────
+ *   up-subtle  light  hsl(152 81% 90%)  ≈ emerald-100
+ *   up-fg      light  hsl(161 88% 20%)  ≈ emerald-800
+ *   up-subtle  dark   hsl(161 94% 17%)  ≈ emerald-900
+ *   up-fg      dark   hsl(152 76% 66%)  ≈ emerald-300
+ *   down-subtle light  hsl(0 93% 94%)   ≈ red-100
+ *   down-fg    light  hsl(0 66% 35%)    ≈ red-800
+ *   down-subtle dark   hsl(0 63% 31%)   ≈ red-900
+ *   down-fg    dark   hsl(0 94% 82%)    ≈ red-300
  */
 
 import { describe, it, expect } from "vitest";
 
 // ── Colour helpers ─────────────────────────────────────────────────────────────
 
-/** Convert an 8-bit channel value (0–255) to a linear light component. */
+/** Convert an 8-bit channel value (0–255) to a linear-light component. */
 function toLinear(c8: number): number {
   const c = c8 / 255;
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -48,20 +46,41 @@ function contrastRatio(
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-// ── Colour constants ───────────────────────────────────────────────────────────
-// All Tailwind v3 defaults.  Opaque backgrounds mean no compositing is needed.
+/** Convert HSL (h 0–360, s 0–100, l 0–100) to an 8-bit RGB triple. */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const sv = s / 100;
+  const lv = l / 100;
+  const C = (1 - Math.abs(2 * lv - 1)) * sv;
+  const X = C * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = lv - C / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60)       { r = C; g = X; b = 0; }
+  else if (h < 120) { r = X; g = C; b = 0; }
+  else if (h < 180) { r = 0; g = C; b = X; }
+  else if (h < 240) { r = 0; g = X; b = C; }
+  else if (h < 300) { r = X; g = 0; b = C; }
+  else              { r = C; g = 0; b = X; }
+  return [
+    Math.round((r + m) * 255),
+    Math.round((g + m) * 255),
+    Math.round((b + m) * 255),
+  ];
+}
 
-// Badge backgrounds
-const EMERALD_100: [number, number, number] = [209, 250, 229]; // #d1fae5
-const EMERALD_900: [number, number, number] = [6, 78, 59];    // #064e3b
-const RED_100: [number, number, number]     = [254, 226, 226]; // #fee2e2
-const RED_900: [number, number, number]     = [127, 29, 29];   // #7f1d1d
+// ── Token-derived colour constants ────────────────────────────────────────────
+// Keep in sync with --status-* values in artifacts/screener/src/index.css.
 
-// Badge text colours
-const EMERALD_300: [number, number, number] = [110, 231, 183]; // #6ee7b7
-const EMERALD_800: [number, number, number] = [6, 95, 70];    // #065f46
-const RED_300: [number, number, number]     = [252, 165, 165]; // #fca5a5
-const RED_800: [number, number, number]     = [153, 27, 27];   // #991b1b
+// Light mode  (:root)
+const UP_SUBTLE_LIGHT   = hslToRgb(152, 81, 90); // --status-up-subtle
+const UP_FG_LIGHT       = hslToRgb(161, 88, 20); // --status-up-fg
+const DOWN_SUBTLE_LIGHT = hslToRgb(0,   93, 94); // --status-down-subtle
+const DOWN_FG_LIGHT     = hslToRgb(0,   66, 35); // --status-down-fg
+
+// Dark mode  (.dark)
+const UP_SUBTLE_DARK    = hslToRgb(161, 94, 17); // --status-up-subtle
+const UP_FG_DARK        = hslToRgb(152, 76, 66); // --status-up-fg
+const DOWN_SUBTLE_DARK  = hslToRgb(0,   63, 31); // --status-down-subtle
+const DOWN_FG_DARK      = hslToRgb(0,   94, 82); // --status-down-fg
 
 // ── Test suite ─────────────────────────────────────────────────────────────────
 
@@ -69,50 +88,49 @@ const WCAG_AA = 4.5;
 
 describe("Badge WCAG AA contrast (≥ 4.5:1)", () => {
   // ── Delta badge (results-table.tsx) ─────────────────────────────────────────
-  // up:   bg-emerald-100 text-emerald-800 / dark:bg-emerald-900 dark:text-emerald-300
-  // down: bg-red-100     text-red-800     / dark:bg-red-900     dark:text-red-300
+  // Uses bg-up-subtle / text-up-fg  and  bg-down-subtle / text-down-fg
 
   describe("delta badge — price-up", () => {
-    it("light mode: text-emerald-800 on bg-emerald-100", () => {
-      expect(contrastRatio(EMERALD_800, EMERALD_100)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("light mode: up-fg on up-subtle", () => {
+      expect(contrastRatio(UP_FG_LIGHT, UP_SUBTLE_LIGHT)).toBeGreaterThanOrEqual(WCAG_AA);
     });
 
-    it("dark mode: text-emerald-300 on dark:bg-emerald-900", () => {
-      expect(contrastRatio(EMERALD_300, EMERALD_900)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("dark mode: up-fg on up-subtle", () => {
+      expect(contrastRatio(UP_FG_DARK, UP_SUBTLE_DARK)).toBeGreaterThanOrEqual(WCAG_AA);
     });
   });
 
   describe("delta badge — price-down", () => {
-    it("light mode: text-red-800 on bg-red-100", () => {
-      expect(contrastRatio(RED_800, RED_100)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("light mode: down-fg on down-subtle", () => {
+      expect(contrastRatio(DOWN_FG_LIGHT, DOWN_SUBTLE_LIGHT)).toBeGreaterThanOrEqual(WCAG_AA);
     });
 
-    it("dark mode: text-red-300 on dark:bg-red-900", () => {
-      expect(contrastRatio(RED_300, RED_900)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("dark mode: down-fg on down-subtle", () => {
+      expect(contrastRatio(DOWN_FG_DARK, DOWN_SUBTLE_DARK)).toBeGreaterThanOrEqual(WCAG_AA);
     });
   });
 
   // ── Status badge (badge.tsx) ─────────────────────────────────────────────────
-  // success: bg-emerald-100 text-emerald-800 / dark:bg-emerald-900 dark:text-emerald-300
-  // danger:  bg-red-100     text-red-800     / dark:bg-red-900     dark:text-red-300
+  // success variant → bg-up-subtle / text-up-fg
+  // danger  variant → bg-down-subtle / text-down-fg
 
   describe("status badge — success (qualified)", () => {
-    it("light mode: text-emerald-800 on bg-emerald-100", () => {
-      expect(contrastRatio(EMERALD_800, EMERALD_100)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("light mode: up-fg on up-subtle", () => {
+      expect(contrastRatio(UP_FG_LIGHT, UP_SUBTLE_LIGHT)).toBeGreaterThanOrEqual(WCAG_AA);
     });
 
-    it("dark mode: text-emerald-300 on dark:bg-emerald-900", () => {
-      expect(contrastRatio(EMERALD_300, EMERALD_900)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("dark mode: up-fg on up-subtle", () => {
+      expect(contrastRatio(UP_FG_DARK, UP_SUBTLE_DARK)).toBeGreaterThanOrEqual(WCAG_AA);
     });
   });
 
   describe("status badge — danger (not qualified)", () => {
-    it("light mode: text-red-800 on bg-red-100", () => {
-      expect(contrastRatio(RED_800, RED_100)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("light mode: down-fg on down-subtle", () => {
+      expect(contrastRatio(DOWN_FG_LIGHT, DOWN_SUBTLE_LIGHT)).toBeGreaterThanOrEqual(WCAG_AA);
     });
 
-    it("dark mode: text-red-300 on dark:bg-red-900", () => {
-      expect(contrastRatio(RED_300, RED_900)).toBeGreaterThanOrEqual(WCAG_AA);
+    it("dark mode: down-fg on down-subtle", () => {
+      expect(contrastRatio(DOWN_FG_DARK, DOWN_SUBTLE_DARK)).toBeGreaterThanOrEqual(WCAG_AA);
     });
   });
 });

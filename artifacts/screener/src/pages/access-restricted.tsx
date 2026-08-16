@@ -30,10 +30,10 @@ export default function AccessRestricted() {
       </div>
 
       <div className="z-10 w-full max-w-md border border-border bg-card p-8 shadow-2xl relative">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-orange-500"></div>
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-down to-orange-500"></div>
 
         <div className="mb-8 flex justify-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20 text-red-500">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-down/10 border border-down/20 text-down">
             <ShieldAlert className="h-8 w-8" />
           </div>
         </div>
@@ -51,7 +51,7 @@ export default function AccessRestricted() {
             <p className="text-xs text-muted-foreground font-mono">
               SIGNED IN AS: {email}
             </p>
-            <p className="text-xs text-red-600 dark:text-red-400 font-mono mt-1">
+            <p className="text-xs text-down font-mono mt-1">
               STATUS: NOT A REQUIRED SPACE GROUP MEMBER
             </p>
           </div>

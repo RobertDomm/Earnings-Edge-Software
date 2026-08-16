@@ -68,7 +68,7 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
         )}
 
         {error && !isLoading && (
-          <div className="flex-1 flex items-center justify-center p-6 text-center text-red-600 dark:text-red-400">
+          <div className="flex-1 flex items-center justify-center p-6 text-center text-down">
             <div className="flex flex-col items-center gap-2">
               <ShieldAlert className="h-8 w-8 mb-2 opacity-50" />
               <span className="font-mono text-sm uppercase tracking-wider">Failed to load data for {symbol}</span>
@@ -96,7 +96,7 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                   <div className="text-2xl font-mono font-semibold">
                     {formatCurrency(detail.stock.price)}
                   </div>
-                  <div className={`flex items-center justify-end font-mono text-sm ${detail.stock.dailyChangePercent > 0 ? "text-emerald-700 dark:text-emerald-500" : detail.stock.dailyChangePercent < 0 ? "text-red-600 dark:text-red-500" : ""}`}>
+                  <div className={`flex items-center justify-end font-mono text-sm ${detail.stock.dailyChangePercent > 0 ? "text-up" : detail.stock.dailyChangePercent < 0 ? "text-down" : ""}`}>
                     {detail.stock.dailyChangePercent > 0 ? <TrendingUp className="mr-1 h-3 w-3" /> : detail.stock.dailyChangePercent < 0 ? <TrendingDown className="mr-1 h-3 w-3" /> : null}
                     {formatPercent(detail.stock.dailyChangePercent)}
                   </div>
@@ -145,12 +145,12 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                         const f6 = getFilter6Data(detail.stock);
                         if (!f6) return null;
                         return (
-                          <div className="border border-emerald-500/30 bg-emerald-500/5 p-4 relative overflow-hidden">
-                            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500/60" />
+                          <div className="border border-up/30 bg-up/5 p-4 relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-up/60" />
                             <div className="pl-3">
                               <div className="flex items-center gap-2 mb-3">
-                                <Activity className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-500" />
-                                <h3 className="text-[10px] font-mono text-emerald-700 dark:text-emerald-500 uppercase tracking-wider">
+                                <Activity className="h-3.5 w-3.5 text-up" />
+                                <h3 className="text-[10px] font-mono text-up uppercase tracking-wider">
                                   Double Calendar Setup
                                 </h3>
                               </div>
@@ -166,7 +166,7 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                                 <div className="space-y-3">
                                   <div>
                                     <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Peak P&amp;L</span>
-                                    <span className="font-mono text-lg font-bold text-emerald-700 dark:text-emerald-500">
+                                    <span className="font-mono text-lg font-bold text-up">
                                       {f6.callPeak}&nbsp;/&nbsp;{f6.putPeak}
                                     </span>
                                   </div>
@@ -265,7 +265,7 @@ export function StockDetailPanel({ symbol, open, onOpenChange }: StockDetailPane
                             </div>
                             <div className="text-right font-mono text-xs">
                               <span className="text-muted-foreground mr-2">Target: {fr.threshold}</span>
-                              <span className={fr.passed ? "text-emerald-700 dark:text-emerald-500" : "text-red-600 dark:text-red-500"}>Value: {fr.calculatedValue}</span>
+                              <span className={fr.passed ? "text-up" : "text-down"}>Value: {fr.calculatedValue}</span>
                             </div>
                           </div>
                           <div className="text-xs text-muted-foreground flex items-start gap-2 mt-3 bg-muted/10 p-2 border-l-2 border-border/50">

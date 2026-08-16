@@ -334,7 +334,7 @@ export default function CustomSignInPage() {
                 autoFocus
                 className="w-full px-3 py-2 border border-input rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50 text-sm bg-background"
               />
-              {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+              {error && <p className="text-sm text-down">{error}</p>}
               <button
                 type="submit"
                 disabled={loading || !email.trim() || !clerkReady}
@@ -364,7 +364,7 @@ export default function CustomSignInPage() {
                 maxLength={6}
                 className="w-full px-3 py-2 border border-input rounded-md text-foreground placeholder:text-muted-foreground text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50 bg-background"
               />
-              {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+              {error && <p className="text-sm text-down">{error}</p>}
               <button
                 type="submit"
                 disabled={loading || code.length < 6}
@@ -381,7 +381,7 @@ export default function CustomSignInPage() {
                   disabled={resendCooldown > 0 || resendStatus === 'sending'}
                   className={
                     resendStatus === 'sent'
-                      ? 'text-emerald-700 dark:text-emerald-400 cursor-default'
+                      ? 'text-up cursor-default'
                       : resendCooldown > 0 || resendStatus === 'sending'
                         ? 'text-muted-foreground/40 cursor-not-allowed'
                         : 'text-muted-foreground hover:text-foreground underline'
