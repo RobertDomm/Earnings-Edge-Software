@@ -11,6 +11,13 @@ export const scannerResultsTable = pgTable("scanner_results", {
   dataFreshness: jsonb("data_freshness").notNull(),
   /** Persisted so all autoscale instances agree on scan lifecycle. */
   status: text("status").notNull().default("idle"),
+  /**
+   * Per-claim ownership token for the scan lease: each scan run writes a
+   * fresh UUID here, and completion/error writes are conditioned on it so a
+   * reclaimed lease cannot be overwritten by a stale run.
+   * Also created idempotently by startup-migrations for existing databases.
+   */
+  runId: text("run_id"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
