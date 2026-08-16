@@ -199,8 +199,10 @@
 :root:not(.dark) [class*="bg-card"] .text-foreground,
 :root:not(.dark) .text-card-foreground .text-foreground {
   color: hsl(0 0% 100%);
+  font-weight: 700;
 }
 :root:not(.dark) [class*="bg-card"] .text-muted-foreground,
 :root:not(.dark) .text-card-foreground .text-muted-foreground {
-  color: hsl(0 0% 90%);
+  color: hsl(0 0% 96%);
+  font-weight: 600;
 }
