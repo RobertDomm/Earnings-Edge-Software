@@ -15,6 +15,7 @@ import { useClerk } from "@clerk/react";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
+import { filterKey } from "@/lib/filter-key";
 
 // ── Auto-refresh interval ────────────────────────────────────────────────────
 
@@ -122,7 +123,11 @@ export default function Dashboard() {
     for (const stock of lastScan.stocks) {
       for (const fr of stock.filterResults) {
         if (fr.passed) {
-          counts.set(fr.name, (counts.get(fr.name) ?? 0) + 1);
+          // Key by the stable "Filter N" prefix so renamed filter titles in
+          // freshly-deployed code still match results persisted under the
+          // old full name.
+          const key = filterKey(fr.name);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
         }
       }
     }

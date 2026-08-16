@@ -1,4 +1,5 @@
 import { useGetScannerFilters } from "@workspace/api-client-react";
+import { filterKey } from "@/lib/filter-key";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 
@@ -66,7 +67,7 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
           {data.filters.map((f) => {
             // When a scan has completed, absent map entry means 0 passed (not unknown)
             const hasCount = filterPassCounts != null;
-            const passed   = hasCount ? (filterPassCounts.counts.get(f.name) ?? 0) : 0;
+            const passed   = hasCount ? (filterPassCounts.counts.get(filterKey(f.name)) ?? 0) : 0;
             const total    = filterPassCounts?.total ?? 0;
             const allPassed = hasCount && total > 0 && passed === total;
 
