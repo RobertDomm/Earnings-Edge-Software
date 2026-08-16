@@ -206,3 +206,13 @@
   color: hsl(0 0% 96%);
   font-weight: 600;
 }
+/* Status/accent colors need lighter shades on the blue surfaces */
+:root:not(.dark) [class*="bg-card"] .text-primary {
+  color: hsl(195 100% 82%);
+}
+:root:not(.dark) [class*="bg-card"] .text-up {
+  color: hsl(150 85% 72%);
+}
+:root:not(.dark) [class*="bg-card"] .text-down {
+  color: hsl(0 100% 80%);
+}
