@@ -4,4 +4,5 @@
 - [External Clerk on Replit](clerk-external-replit.md) — use clerkMiddleware() with no args; do NOT pass getClerkProxyHost() to it or Clerk loads from clerk.{dev-domain} and crashes.
 - [Clerk prod instance settings](clerk-prod-instance-settings.md) — Clerk dev/prod configs are separate; prod 422 "email_address not valid parameter" means email identifier + email-code strategy not enabled in the Production instance.
 - [Nasdaq earnings endpoints](nasdaq-earnings-calendar.md) — keyless APIs: calendar for confirmed future dates; per-symbol earnings-surprise for past reported dates (ADR Filter-4 fallback). Browser UA required.
+- [Screener light-theme conventions](screener-light-theme.md) — blue boxes/white bold text via bg-card CSS overrides; radius scale caps at 8px, rounded-2xl silently no-ops — use rounded-[16px].
 - [Circle Admin v2 API](circle-api-admin-v2.md) — correct endpoint for space group membership is /api/admin/v2/space_group_member?email=X&space_group_id=Y; token type must be "Admin v2"; NOT /api/v1/.

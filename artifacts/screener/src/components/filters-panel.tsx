@@ -81,12 +81,12 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
                 {hasCount && (
                   <p
                     className={[
-                      "text-[10px] font-mono leading-tight mt-0.5",
+                      "text-[10px] font-mono leading-tight mt-0.5 font-bold text-white dark:font-normal",
                       allPassed
-                        ? "text-up"
+                        ? "dark:text-up"
                         : passed === 0
-                        ? "text-down-muted"
-                        : "text-amber-600 dark:text-amber-400",
+                        ? "dark:text-down-muted"
+                        : "dark:text-amber-400",
                     ].join(" ")}
                   >
                     {`${passed}/${total} passed`}
