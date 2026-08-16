@@ -116,12 +116,12 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
     return <ArrowDown className="ml-1 h-3 w-3 text-primary" />;
   };
 
-  const renderSortableHeader = (label: string, key: SortKey) => (
+  const renderSortableHeader = (label: string, key: SortKey, align: "left" | "center" = "left") => (
     <TableHead
       className="cursor-pointer group select-none whitespace-nowrap text-xs font-mono font-normal uppercase tracking-wider h-10 px-3 py-2 bg-muted/30"
       onClick={() => handleSort(key)}
     >
-      <div className="flex items-center">
+      <div className={`flex items-center${align === "center" ? " justify-center" : ""}`}>
         {label}
         <SortIcon columnKey={key} />
       </div>
@@ -179,7 +179,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
                 {renderSortableHeader("Symbol", "symbol")}
                 {renderSortableHeader("Company", "company")}
                 {renderSortableHeader("Price", "price")}
-                {renderSortableHeader("Daily Change", "dailyChangePercent")}
+                {renderSortableHeader("Daily Change", "dailyChangePercent", "center")}
                 {renderSortableHeader("Earnings", "nextEarningsDate")}
                 {Array.from({ length: numFilters }, (_, i) => renderFilterHeader(i))}
                 {renderSortableHeader("Score", "filterScore")}
@@ -250,7 +250,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
 
                       {/* Daily Change */}
                       <TableCell
-                        className={`font-mono text-right px-3 py-2.5 ${
+                        className={`font-mono text-center px-3 py-2.5 ${
                           stock.dailyChangePercent > 0
                             ? "text-up"
                             : stock.dailyChangePercent < 0

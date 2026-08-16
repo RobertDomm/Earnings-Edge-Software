@@ -13,13 +13,6 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
-import {
   Loader2,
   Play,
   RefreshCw,
@@ -32,40 +25,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { formatCompactNumber } from "@/lib/formatters";
 import { useTimeAgo } from "@/hooks/use-time-ago";
 import type { AutoScannerState } from "@/hooks/use-auto-scanner";
-import type { FlashThresholdOption } from "@/pages/dashboard";
-
-export type AutoRefreshIntervalOption = 0 | 15 | 30 | 60 | 300;
-
-const THRESHOLD_OPTIONS: { value: FlashThresholdOption; label: string }[] = [
-  { value: 0.001,  label: "±0.1%" },
-  { value: 0.0025, label: "±0.25%" },
-  { value: 0.005,  label: "±0.5%" },
-  { value: 0.01,   label: "±1%" },
-  { value: 0.02,   label: "±2%" },
-];
 
 interface ScannerStatusWidgetProps {
   autoScanner: AutoScannerState;
-  intervalSeconds: AutoRefreshIntervalOption;
-  onIntervalChange: (next: AutoRefreshIntervalOption) => void;
-  flashThreshold: FlashThresholdOption;
-  onFlashThresholdChange: (next: FlashThresholdOption) => void;
+  intervalSeconds: number;
 }
-
-const INTERVAL_OPTIONS: { value: AutoRefreshIntervalOption; label: string }[] = [
-  { value: 0, label: "Manual" },
-  { value: 15, label: "15s" },
-  { value: 30, label: "30s" },
-  { value: 60, label: "1m" },
-  { value: 300, label: "5m" },
-];
 
 export function ScannerStatusWidget({
   autoScanner,
   intervalSeconds,
-  onIntervalChange,
-  flashThreshold,
-  onFlashThresholdChange,
 }: ScannerStatusWidgetProps) {
   const queryClient = useQueryClient();
 
@@ -214,7 +182,7 @@ export function ScannerStatusWidget({
           </div>
         </div>
 
-        {/* ── Right: Last updated + interval selector ── */}
+        {/* ── Right: Last updated + refresh ── */}
         <div className="flex items-center gap-3 md:ml-auto">
           {/* Timestamps */}
           <div className="flex flex-col text-right text-xs font-mono text-muted-foreground">
@@ -253,62 +221,6 @@ export function ScannerStatusWidget({
               className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
             />
           </Button>
-
-          {/* Auto-refresh interval selector */}
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest text-right">
-              Auto-refresh
-            </span>
-            <Select
-              value={String(intervalSeconds)}
-              onValueChange={(v) =>
-                onIntervalChange(Number(v) as AutoRefreshIntervalOption)
-              }
-            >
-              <SelectTrigger className="h-7 w-[72px] rounded-none font-mono text-[11px] border-border bg-muted/40 dark:bg-black/40 px-2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-none border-border font-mono text-xs">
-                {INTERVAL_OPTIONS.map((opt) => (
-                  <SelectItem
-                    key={opt.value}
-                    value={String(opt.value)}
-                    className="font-mono text-xs"
-                  >
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Flash threshold selector */}
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest text-right">
-              Flash at
-            </span>
-            <Select
-              value={String(flashThreshold)}
-              onValueChange={(v) =>
-                onFlashThresholdChange(Number(v) as FlashThresholdOption)
-              }
-            >
-              <SelectTrigger className="h-7 w-[72px] rounded-none font-mono text-[11px] border-border bg-muted/40 dark:bg-black/40 px-2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-none border-border font-mono text-xs">
-                {THRESHOLD_OPTIONS.map((opt) => (
-                  <SelectItem
-                    key={opt.value}
-                    value={String(opt.value)}
-                    className="font-mono text-xs"
-                  >
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
         </div>
       </CardContent>
     </Card>

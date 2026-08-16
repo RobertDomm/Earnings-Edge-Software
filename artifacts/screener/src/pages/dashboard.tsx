@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { MarketStatusWidget } from "@/components/market-status-widget";
-import { ScannerStatusWidget, type AutoRefreshIntervalOption } from "@/components/scanner-status-widget";
+import { ScannerStatusWidget } from "@/components/scanner-status-widget";
 import { FiltersPanel } from "@/components/filters-panel";
 import { ResultsTable } from "@/components/results-table";
 import { useAutoScanner } from "@/hooks/use-auto-scanner";
@@ -17,71 +17,20 @@ import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
 import { filterKey } from "@/lib/filter-key";
 
-// ── Auto-refresh interval ────────────────────────────────────────────────────
+// ── Fixed scanner settings ───────────────────────────────────────────────────
 
-const DEFAULT_INTERVAL: AutoRefreshIntervalOption = 30;
-const INTERVAL_STORAGE_KEY = "screener:auto-refresh-interval";
-const VALID_INTERVALS = new Set<number>([0, 15, 30, 60, 300]);
+/** Auto-refresh runs at a standard 15 seconds — no user configuration. */
+const AUTO_REFRESH_SECONDS = 15;
 
-function readStoredInterval(): AutoRefreshIntervalOption {
-  try {
-    const raw = localStorage.getItem(INTERVAL_STORAGE_KEY);
-    if (raw === null) return DEFAULT_INTERVAL;
-    const parsed = Number(raw);
-    return VALID_INTERVALS.has(parsed) ? (parsed as AutoRefreshIntervalOption) : DEFAULT_INTERVAL;
-  } catch {
-    return DEFAULT_INTERVAL;
-  }
-}
-
-function writeStoredInterval(value: AutoRefreshIntervalOption): void {
-  try { localStorage.setItem(INTERVAL_STORAGE_KEY, String(value)); } catch { /* ignore */ }
-}
-
-// ── Flash threshold ──────────────────────────────────────────────────────────
-
-export type FlashThresholdOption = 0.001 | 0.0025 | 0.005 | 0.01 | 0.02;
-
-const DEFAULT_THRESHOLD: FlashThresholdOption = 0.001;
-const THRESHOLD_STORAGE_KEY = "screener:flash-threshold";
-const VALID_THRESHOLDS = new Set<number>([0.001, 0.0025, 0.005, 0.01, 0.02]);
-
-function readStoredThreshold(): FlashThresholdOption {
-  try {
-    const raw = localStorage.getItem(THRESHOLD_STORAGE_KEY);
-    if (raw === null) return DEFAULT_THRESHOLD;
-    const parsed = Number(raw);
-    return VALID_THRESHOLDS.has(parsed) ? (parsed as FlashThresholdOption) : DEFAULT_THRESHOLD;
-  } catch {
-    return DEFAULT_THRESHOLD;
-  }
-}
-
-function writeStoredThreshold(value: FlashThresholdOption): void {
-  try { localStorage.setItem(THRESHOLD_STORAGE_KEY, String(value)); } catch { /* ignore */ }
-}
+/** Price flash triggers at ±0.1% — no user configuration. */
+export type FlashThresholdOption = 0.001;
+const FLASH_THRESHOLD: FlashThresholdOption = 0.001;
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { auth } = useRequireAuth();
   const [_, setLocation] = useLocation();
-
-  const [intervalSeconds, setIntervalSeconds] =
-    useState<AutoRefreshIntervalOption>(readStoredInterval);
-
-  const handleIntervalChange = (next: AutoRefreshIntervalOption) => {
-    writeStoredInterval(next);
-    setIntervalSeconds(next);
-  };
-
-  const [flashThreshold, setFlashThreshold] =
-    useState<FlashThresholdOption>(readStoredThreshold);
-
-  const handleFlashThresholdChange = (next: FlashThresholdOption) => {
-    writeStoredThreshold(next);
-    setFlashThreshold(next);
-  };
 
   const { data: marketStatus } = useGetMarketStatus({
     query: {
@@ -92,7 +41,7 @@ export default function Dashboard() {
 
   const autoScanner = useAutoScanner({
     marketState: marketStatus?.state,
-    intervalSeconds,
+    intervalSeconds: AUTO_REFRESH_SECONDS,
     enabled: !!auth?.authorized,
   });
 
@@ -177,10 +126,7 @@ export default function Dashboard() {
           <div className="lg:col-span-3">
             <ScannerStatusWidget
               autoScanner={autoScanner}
-              intervalSeconds={intervalSeconds}
-              onIntervalChange={handleIntervalChange}
-              flashThreshold={flashThreshold}
-              onFlashThresholdChange={handleFlashThresholdChange}
+              intervalSeconds={AUTO_REFRESH_SECONDS}
             />
           </div>
         </div>
@@ -198,7 +144,7 @@ export default function Dashboard() {
                 </span>
               </div>
             ) : (
-              <ResultsTable stocks={stocks} flashThreshold={flashThreshold} />
+              <ResultsTable stocks={stocks} flashThreshold={FLASH_THRESHOLD} />
             )}
           </div>
         </div>
