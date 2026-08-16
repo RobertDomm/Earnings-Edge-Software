@@ -90,19 +90,19 @@
      --primary stays blue (tickers, scanner button). */
   --background: 0 0% 100%;
   --foreground: 0 0% 0%;
-  --card: 210 60% 92%;
+  --card: 210 80% 87%;
   --card-foreground: 0 0% 0%;
   --card-border: 0 0% 0%;
-  --popover: 210 60% 92%;
+  --popover: 210 80% 87%;
   --popover-foreground: 0 0% 0%;
   --popover-border: 0 0% 0%;
   --primary: 210 100% 50%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 55% 91%;
+  --secondary: 210 75% 86%;
   --secondary-foreground: 0 0% 0%;
-  --muted: 210 55% 91%;
+  --muted: 210 75% 86%;
   --muted-foreground: 0 0% 20%;
-  --accent: 210 55% 88%;
+  --accent: 210 75% 82%;
   --accent-foreground: 0 0% 0%;
   --destructive: 0 84.2% 45%;
   --destructive-foreground: 0 0% 100%;
