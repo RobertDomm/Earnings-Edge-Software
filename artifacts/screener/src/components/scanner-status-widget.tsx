@@ -194,6 +194,9 @@ export function ScannerStatusWidget({
                     {lastUpdatedAgo}
                   </span>
                 </span>
+                <span className="opacity-70 text-[10px]">
+                  Auto Refresh: {intervalSeconds} sec
+                </span>
                 {scannerState?.lastScan?.scanTime && (
                   <span className="opacity-50 text-[10px]">
                     Scan:{" "}
