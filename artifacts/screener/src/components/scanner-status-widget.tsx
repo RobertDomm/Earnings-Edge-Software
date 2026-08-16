@@ -81,7 +81,7 @@ export function ScannerStatusWidget({
 
   if (isLoading) {
     return (
-      <Card className="rounded-xl dark:rounded-none overflow-hidden border-border/50 bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none">
+      <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border/50 bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none">
         <CardContent className="p-4 flex items-center gap-4 animate-pulse">
           <div className="h-8 w-32 bg-muted/50 rounded-none" />
           <div className="h-4 w-48 bg-muted/50" />
@@ -91,7 +91,7 @@ export function ScannerStatusWidget({
   }
 
   return (
-    <Card className="rounded-xl dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none backdrop-blur-sm relative overflow-hidden flex-1">
+    <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none backdrop-blur-sm relative overflow-hidden flex-1">
       <div className="absolute top-0 left-0 w-1 h-full bg-primary/50" />
 
       {isServingCachedData && (
@@ -111,7 +111,7 @@ export function ScannerStatusWidget({
           <Button
             onClick={handleRunScanner}
             disabled={isRunning}
-            className="rounded-lg dark:rounded-none font-mono uppercase tracking-wider h-10 px-6 bg-blue-950 text-white hover:bg-blue-900 transition-all border border-blue-950/50 shrink-0"
+            className="rounded-lg dark:rounded-none font-mono uppercase tracking-wider h-10 px-6 bg-blue-950 hover:bg-blue-900 border-blue-950/50 dark:bg-primary dark:hover:bg-primary/90 dark:border-primary/50 text-white dark:text-primary-foreground transition-all border shrink-0"
           >
             {isRunning ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

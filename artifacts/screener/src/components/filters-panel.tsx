@@ -18,7 +18,7 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
   // Skeleton rows while loading
   if (isLoading) {
     return (
-      <Card className="rounded-xl dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/20 shadow-md shadow-black/10 dark:shadow-none">
+      <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/20 shadow-md shadow-black/10 dark:shadow-none">
         <CardHeader className="p-3 border-b border-border bg-black/25 dark:bg-muted/20">
           <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Active Filters
@@ -40,7 +40,7 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
 
   if (isError || !data) {
     return (
-      <Card className="rounded-xl dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/20 shadow-md shadow-black/10 dark:shadow-none">
+      <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/20 shadow-md shadow-black/10 dark:shadow-none">
         <CardHeader className="p-3 border-b border-border bg-black/25 dark:bg-muted/20">
           <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Active Filters
@@ -56,7 +56,7 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
   }
 
   return (
-    <Card className="rounded-xl dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/20 shadow-md shadow-black/10 dark:shadow-none">
+    <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/20 shadow-md shadow-black/10 dark:shadow-none">
       <CardHeader className="p-3 border-b border-border bg-black/25 dark:bg-muted/20">
         <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Active Filters

@@ -92,6 +92,14 @@ export default function Dashboard() {
       <div className="absolute inset-0 z-0 pointer-events-none dark:opacity-10">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
       </div>
+      {/* Light mode: faint large logo watermark */}
+      <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center dark:hidden">
+        <img
+          src="/ees-hex-logo.png"
+          alt=""
+          className="w-[640px] max-w-[75vw] opacity-[0.07] select-none"
+        />
+      </div>
 
       <header className="border-b border-border bg-card/80 backdrop-blur-md z-10 sticky top-0 h-14 flex items-center justify-between px-6">
         <div className="flex items-center gap-1.5">

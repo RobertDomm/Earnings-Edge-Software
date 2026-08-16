@@ -171,7 +171,7 @@ export function ResultsTable({ stocks, flashThreshold = 0.001 }: ResultsTablePro
         </div>
       </div>
 
-      <div className="border border-border bg-muted/20 dark:bg-black/20 rounded-xl dark:rounded-none shadow-md shadow-black/10 dark:shadow-none overflow-hidden flex-1 relative">
+      <div className="border border-border bg-muted/20 dark:bg-black/20 rounded-[16px] dark:rounded-none shadow-md shadow-black/10 dark:shadow-none overflow-hidden flex-1 relative">
         <div className="overflow-auto max-h-[800px]">
           <Table className="w-full text-sm">
             <TableHeader className="sticky top-0 z-10 border-b border-border shadow-sm">

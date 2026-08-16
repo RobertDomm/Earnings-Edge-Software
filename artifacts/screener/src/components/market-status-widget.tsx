@@ -13,7 +13,7 @@ export function MarketStatusWidget() {
 
   if (isLoading) {
     return (
-      <Card className="rounded-xl dark:rounded-none overflow-hidden border-border/50 bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none">
+      <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border/50 bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none">
         <CardContent className="p-4 flex items-center gap-4 animate-pulse">
           <div className="h-4 w-24 bg-muted/50"></div>
           <div className="h-4 w-32 bg-muted/50"></div>
@@ -34,7 +34,7 @@ export function MarketStatusWidget() {
   const badgeColor = stateColors[marketStatus.state] || "default";
 
   return (
-    <Card className="rounded-xl dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none backdrop-blur-sm relative overflow-hidden">
+    <Card className="rounded-[16px] dark:rounded-none overflow-hidden border-border bg-card dark:bg-black/40 shadow-md shadow-black/10 dark:shadow-none backdrop-blur-sm relative overflow-hidden">
       <div className="absolute top-0 left-0 w-1 h-full bg-border" />
       <CardContent className="p-4 flex items-center justify-between">
         <div className="flex flex-col gap-1">
