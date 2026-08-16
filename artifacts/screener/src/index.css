@@ -90,20 +90,20 @@
      --primary stays blue (tickers, scanner button). */
   --background: 0 0% 100%;
   --foreground: 0 0% 0%;
-  --card: 210 80% 87%;
-  --card-foreground: 0 0% 0%;
+  --card: 210 85% 40%;
+  --card-foreground: 0 0% 100%;
   --card-border: 0 0% 0%;
-  --popover: 210 80% 87%;
-  --popover-foreground: 0 0% 0%;
+  --popover: 210 85% 40%;
+  --popover-foreground: 0 0% 100%;
   --popover-border: 0 0% 0%;
   --primary: 210 100% 50%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 75% 86%;
-  --secondary-foreground: 0 0% 0%;
+  --secondary: 210 85% 40%;
+  --secondary-foreground: 0 0% 100%;
   --muted: 210 75% 86%;
   --muted-foreground: 0 0% 20%;
-  --accent: 210 75% 82%;
-  --accent-foreground: 0 0% 0%;
+  --accent: 210 85% 34%;
+  --accent-foreground: 0 0% 100%;
   --destructive: 0 84.2% 45%;
   --destructive-foreground: 0 0% 100%;
   --border: 0 0% 0%;
@@ -192,4 +192,15 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
+}
+
+/* Light mode: boxes (card surfaces) are logo blue — force text inside them white.
+   Table area keeps light background, so global --foreground stays black. */
+:root:not(.dark) [class*="bg-card"] .text-foreground,
+:root:not(.dark) .text-card-foreground .text-foreground {
+  color: hsl(0 0% 100%);
+}
+:root:not(.dark) [class*="bg-card"] .text-muted-foreground,
+:root:not(.dark) .text-card-foreground .text-muted-foreground {
+  color: hsl(0 0% 90%);
 }
