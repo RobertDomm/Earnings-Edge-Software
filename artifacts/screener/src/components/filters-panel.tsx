@@ -19,13 +19,13 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
   if (isLoading) {
     return (
       <Card className="rounded-none border-border bg-card dark:bg-black/20 shadow-none">
-        <CardHeader className="p-3 border-b border-border bg-muted/20">
+        <CardHeader className="p-3 border-b border-border bg-black/25 dark:bg-muted/20">
           <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Active Filters
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="flex flex-col divide-y divide-border">
+          <div className="flex flex-col divide-y divide-border bg-muted/25 dark:bg-transparent">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center justify-between p-3 py-2.5">
                 <span className="h-3 w-32 rounded bg-muted/40 animate-pulse" />
@@ -41,7 +41,7 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
   if (isError || !data) {
     return (
       <Card className="rounded-none border-border bg-card dark:bg-black/20 shadow-none">
-        <CardHeader className="p-3 border-b border-border bg-muted/20">
+        <CardHeader className="p-3 border-b border-border bg-black/25 dark:bg-muted/20">
           <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             Active Filters
           </CardTitle>
@@ -57,13 +57,13 @@ export function FiltersPanel({ filterPassCounts }: FiltersPanelProps) {
 
   return (
     <Card className="rounded-none border-border bg-card dark:bg-black/20 shadow-none">
-      <CardHeader className="p-3 border-b border-border bg-muted/20">
+      <CardHeader className="p-3 border-b border-border bg-black/25 dark:bg-muted/20">
         <CardTitle className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Active Filters
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="flex flex-col divide-y divide-border">
+        <div className="flex flex-col divide-y divide-border bg-muted/25 dark:bg-transparent">
           {data.filters.map((f) => {
             // When a scan has completed, absent map entry means 0 passed (not unknown)
             const hasCount = filterPassCounts != null;
