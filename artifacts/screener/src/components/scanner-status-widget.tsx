@@ -188,17 +188,17 @@ export function ScannerStatusWidget({
           <div className="flex flex-col text-right text-xs font-mono text-muted-foreground">
             {lastUpdatedAgo ? (
               <>
-                <span className="text-foreground/80">
+                <span className="text-white font-bold dark:text-foreground/80 dark:font-normal">
                   Updated{" "}
-                  <span className="text-cyan-600 dark:text-cyan-400 font-semibold">
+                  <span className="text-white font-bold dark:text-cyan-400 dark:font-semibold">
                     {lastUpdatedAgo}
                   </span>
                 </span>
-                <span className="opacity-70 text-[10px]">
+                <span className="text-white font-bold dark:text-inherit dark:font-normal dark:opacity-70 text-[10px]">
                   Auto Refresh: {intervalSeconds} sec
                 </span>
                 {scannerState?.lastScan?.scanTime && (
-                  <span className="opacity-50 text-[10px]">
+                  <span className="text-white font-bold dark:text-inherit dark:font-normal dark:opacity-50 text-[10px]">
                     Scan:{" "}
                     {new Date(
                       scannerState.lastScan.scanTime
